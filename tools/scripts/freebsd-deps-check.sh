@@ -9,26 +9,26 @@ echo ""
 
 # Function to check if a package is installed
 check_pkg() {
-    if pkg info -e "$1" > /dev/null 2>&1; then
-        echo "✓ $1 is installed"
-        return 0
-    else
-        echo "✗ $1 is not installed"
-        return 1
-    fi
+  if pkg info -e "$1" >/dev/null 2>&1; then
+    echo "✓ $1 is installed"
+    return 0
+  else
+    echo "✗ $1 is not installed"
+    return 1
+  fi
 }
 
 # Function to check if a command exists
 check_command() {
-    if command -v "$1" > /dev/null 2>&1; then
-        echo "✓ $1 command is available"
-        version=$($1 --version 2>&1 | head -n 1)
-        echo "  Version: $version"
-        return 0
-    else
-        echo "✗ $1 command is not available"
-        return 1
-    fi
+  if command -v "$1" >/dev/null 2>&1; then
+    echo "✓ $1 command is available"
+    version=$($1 --version 2>&1 | head -n 1)
+    echo "  Version: $version"
+    return 0
+  else
+    echo "✗ $1 command is not available"
+    return 1
+  fi
 }
 
 # Check for basic dependencies
@@ -47,10 +47,10 @@ check_command npx
 
 # Check for TypeScript
 if check_command tsc; then
-    HAS_TS=true
+  HAS_TS=true
 else
-    echo "  TypeScript can be installed globally with: npm install -g typescript"
-    HAS_TS=false
+  echo "  TypeScript can be installed globally with: npm install -g typescript"
+  HAS_TS=false
 fi
 echo ""
 
@@ -61,7 +61,7 @@ check_command cargo
 check_command rustup
 
 if [ $? -ne 0 ]; then
-    echo "  Rust can be installed with: pkg install rust || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+  echo "  Rust can be installed with: pkg install rust || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
 fi
 echo ""
 
@@ -69,7 +69,7 @@ echo ""
 echo "=== Checking Go Toolchain ==="
 check_command go
 if [ $? -ne 0 ]; then
-    echo "  Go can be installed with: pkg install go"
+  echo "  Go can be installed with: pkg install go"
 fi
 echo ""
 
@@ -77,12 +77,12 @@ echo ""
 echo "=== Checking WebAssembly Tools ==="
 check_command wasm-pack
 if [ $? -ne 0 ]; then
-    echo "  wasm-pack can be installed with: cargo install wasm-pack"
+  echo "  wasm-pack can be installed with: cargo install wasm-pack"
 fi
 
 check_command wasmer
 if [ $? -ne 0 ]; then
-    echo "  wasmer can be installed with: pkg install wasmer || curl https://get.wasmer.io -sSfL | sh"
+  echo "  wasmer can be installed with: pkg install wasmer || curl https://get.wasmer.io -sSfL | sh"
 fi
 echo ""
 
@@ -93,8 +93,8 @@ check_command pip || check_command pip3
 
 echo "  For Python data visualization (optional):"
 PIP_CMD="pip"
-if ! command -v pip > /dev/null 2>&1 && command -v pip3 > /dev/null 2>&1; then
-    PIP_CMD="pip3"
+if ! command -v pip >/dev/null 2>&1 && command -v pip3 >/dev/null 2>&1; then
+  PIP_CMD="pip3"
 fi
 echo "  $PIP_CMD install matplotlib numpy"
 echo ""
