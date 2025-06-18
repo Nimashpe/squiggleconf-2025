@@ -38,7 +38,7 @@ Michigan TypeScript is a growing community focused on TypeScript education, ment
 ** Michigan TypeScript Projects
 
 *** TypeScript Mentorship Program
-#+begin_src typescript :tangle ../tools/scripts/mentorship-match.ts
+#+begin_src js :tangle ../tools/scripts/mentorship-match.js
 interface MentorshipParticipant {
   name: string;
   email: string;

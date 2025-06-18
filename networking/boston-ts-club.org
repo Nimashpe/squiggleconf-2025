@@ -36,7 +36,7 @@ The Boston TypeScript Club is a community of TypeScript enthusiasts, developers,
 
 *** Lightning Talk Submission
 To submit a lightning talk for the open mic portion:
-#+begin_src typescript :tangle ../tools/scripts/submit-lightning-talk.ts
+#+begin_src js :tangle ../tools/scripts/submit-lightning-talk.js
 import { LightningTalk } from './types';
 
 /**
