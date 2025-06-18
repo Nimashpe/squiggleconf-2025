@@ -1,0 +1,64 @@
+#+TITLE: Advanced Developer Tutorials
+#+AUTHOR: SquiggleConf 2025 Team
+#+DATE: <2025-06-18 Wed>
+#+STARTUP: overview
+
+* Advanced Developer Tutorials
+
+These tutorials cover advanced topics for senior developers interested in language design, compiler construction, and developer tooling.
+
+** Focused Languages
+
+- [[file:go/README.org][Go]] - Static typing with simplicity
+- [[file:typescript/README.org][TypeScript]] - JavaScript with advanced type checking
+- [[file:rust/README.org][Rust]] - Memory safety without garbage collection
+- [[file:zig/README.org][Zig]] - Low-level programming with compile-time execution
+
+** Refresher Links
+
+*** Web Development
+- [[https://developer.mozilla.org/en-US/docs/Web][MDN Web Docs]] - Comprehensive web development resources
+- [[https://web.dev/][web.dev]] - Modern web capabilities and best practices
+- [[https://reactjs.org/docs/getting-started.html][React Documentation]] - UI library documentation
+
+*** Functional Languages
+- [[https://ocaml.org/docs/][OCaml Documentation]] - Functional programming with static typing
+- [[https://www.haskell.org/documentation/][Haskell Documentation]] - Pure functional programming language
+- [[https://clojure.org/guides/getting_started][Clojure Getting Started]] - Functional Lisp for the JVM
+
+*** Systems & Tools
+- [[https://docs.kernel.org/][Linux Kernel Documentation]] - Kernel documentation for systems programming
+- [[https://llvm.org/docs/][LLVM Documentation]] - Compiler infrastructure project
+- [[https://gcc.gnu.org/onlinedocs/][GCC Documentation]] - GNU compiler collection resources
+
+** Core Topics
+
+Each language section covers these advanced topics:
+
+- *Parsing & Lexing*: Building parsers and lexers for domain-specific languages
+- *Recursion & Control Flow*: Advanced recursion patterns and flow control
+- *Pattern Matching*: Techniques for powerful data decomposition
+- *Generators & Iterators*: Implementing efficient lazy sequences
+- *Advanced Type Systems*: Working with complex type relationships
+
+** Prerequisites
+
+These tutorials assume:
+
+- Strong familiarity with the target language
+- Understanding of basic compiler concepts
+- Experience with data structures and algorithms
+- Some exposure to formal language theory
+
+** Resources
+
+Each tutorial includes:
+
+- Executable code examples
+- Deep technical explanations
+- Practical exercises
+- Real-world applications
+
+** Contributing
+
+See [[file:../CONTRIBUTORS.org][CONTRIBUTORS.org]] for information on contributing additional tutorials.
