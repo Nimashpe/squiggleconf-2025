@@ -1,0 +1,941 @@
+#+TITLE: Zig for Systems Programming and Compiler Development
+#+AUTHOR: SquiggleConf 2025 Team
+#+DATE: <2025-06-18 Wed>
+#+STARTUP: overview
+#+PROPERTY: header-args:zig :results output
+
+* Zig for Staff+ and Principal Engineers
+
+This tutorial focuses on advanced Zig techniques for systems programming, compiler development, and tooling.
+
+** About This Tutorial
+
+This tutorial is designed for experienced engineers who want to leverage Zig's unique features for:
+- Systems programming with memory safety guarantees
+- Compiler development and low-level tooling
+- Cross-compilation and embedded systems
+- Performance-critical applications
+
+Run ~gmake help~ for available tooling options.
+
+** Comptime: Zig's Compile-Time Metaprogramming
+
+Zig's comptime is a powerful feature that enables computation during compilation:
+
+#+begin_src zig
+const std = @import("std");
+
+// Type-level function that generates array types
+fn Array(comptime T: type, comptime size: usize) type {
+    return struct {
+        data: [size]T,
+        len: usize,
+
+        const Self = @This();
+
+        pub fn init() Self {
+            return Self{
+                .data = undefined,
+                .len = 0,
+            };
+        }
+
+        pub fn push(self: *Self, item: T) !void {
+            if (self.len >= size) return error.OutOfMemory;
+            self.data[self.len] = item;
+            self.len += 1;
+        }
+
+        pub fn get(self: *const Self, index: usize) ?T {
+            if (index >= self.len) return null;
+            return self.data[index];
+        }
+    };
+}
+
+pub fn main() !void {
+    // Create a specialized integer array with 10 elements
+    var intArray = Array(i32, 10).init();
+    try intArray.push(42);
+    try intArray.push(100);
+    
+    // Create a specialized float array with 5 elements
+    var floatArray = Array(f64, 5).init();
+    try floatArray.push(3.14);
+    
+    // Print the first element of each array
+    if (intArray.get(0)) |value| {
+        std.debug.print("First integer: {}\n", .{value});
+    }
+    
+    if (floatArray.get(0)) |value| {
+        std.debug.print("First float: {}\n", .{value});
+    }
+}
+#+end_src
+
+** Error Handling and Error Sets
+
+Zig's error handling is explicit and composable:
+
+#+begin_src zig
+const std = @import("std");
+
+// Define custom error sets
+const FileError = error{
+    NotFound,
+    PermissionDenied,
+    Corrupted,
+};
+
+const NetworkError = error{
+    ConnectionFailed,
+    Timeout,
+    InvalidResponse,
+};
+
+// Combine error sets
+const AppError = FileError || NetworkError;
+
+// Function that returns a specific error set
+fn readConfig(path: []const u8) FileError![]const u8 {
+    if (std.mem.eql(u8, path, "/nonexistent")) {
+        return FileError.NotFound;
+    }
+    if (std.mem.eql(u8, path, "/protected")) {
+        return FileError.PermissionDenied;
+    }
+    return "config_data";
+}
+
+// Function that uses another error set
+fn fetchData(url: []const u8) NetworkError![]const u8 {
+    if (std.mem.eql(u8, url, "https://invalid")) {
+        return NetworkError.ConnectionFailed;
+    }
+    return "response_data";
+}
+
+// Function that combines error sets
+fn loadData(config_path: []const u8, api_url: []const u8) AppError!void {
+    // Errors from readConfig are automatically promoted to AppError
+    const config = try readConfig(config_path);
+    std.debug.print("Config loaded: {s}\n", .{config});
+    
+    // Errors from fetchData are automatically promoted to AppError
+    const data = try fetchData(api_url);
+    std.debug.print("Data fetched: {s}\n", .{data});
+}
+
+pub fn main() void {
+    // Success case
+    loadData("/valid_config", "https://valid") catch |err| {
+        std.debug.print("Error: {}\n", .{err});
+        return;
+    };
+    
+    // File error case
+    loadData("/nonexistent", "https://valid") catch |err| {
+        std.debug.print("Error: {}\n", .{err});
+    };
+    
+    // Network error case
+    loadData("/valid_config", "https://invalid") catch |err| {
+        std.debug.print("Error: {}\n", .{err});
+    };
+}
+#+end_src
+
+** Memory Management and Allocators
+
+Zig gives explicit control over memory allocation strategies:
+
+#+begin_src zig
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+
+// A custom type that requires allocation
+const CustomList = struct {
+    items: []i32,
+    allocator: Allocator,
+
+    // Constructor that takes an allocator
+    pub fn init(allocator: Allocator) !CustomList {
+        return CustomList{
+            .items = try allocator.alloc(i32, 0),
+            .allocator = allocator,
+        };
+    }
+
+    // Always free memory
+    pub fn deinit(self: *CustomList) void {
+        self.allocator.free(self.items);
+        self.items = undefined;
+    }
+
+    // Add an item, reallocating as needed
+    pub fn append(self: *CustomList, value: i32) !void {
+        const new_items = try self.allocator.realloc(self.items, self.items.len + 1);
+        self.items = new_items;
+        self.items[self.items.len - 1] = value;
+    }
+
+    // Print all items
+    pub fn print(self: CustomList) void {
+        std.debug.print("List contents: ", .{});
+        for (self.items) |item| {
+            std.debug.print("{} ", .{item});
+        }
+        std.debug.print("\n", .{});
+    }
+};
+
+// Demonstrates different allocators
+pub fn main() !void {
+    // General purpose allocator - good for applications
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const gpa_allocator = gpa.allocator();
+
+    // Use GPA for a list
+    var list1 = try CustomList.init(gpa_allocator);
+    defer list1.deinit();
+    try list1.append(1);
+    try list1.append(2);
+    try list1.append(3);
+    list1.print();
+
+    // Arena allocator - efficient for temporary allocations
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
+    // Use arena for another list
+    var list2 = try CustomList.init(arena_allocator);
+    // No need to call list2.deinit() individually since arena.deinit() frees everything at once
+    try list2.append(10);
+    try list2.append(20);
+    list2.print();
+
+    // Fixed buffer allocator - no heap allocation
+    var buffer: [1024]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const fba_allocator = fba.allocator();
+
+    // Use fixed buffer for a third list
+    var list3 = try CustomList.init(fba_allocator);
+    defer list3.deinit();
+    try list3.append(100);
+    try list3.append(200);
+    try list3.append(300);
+    list3.print();
+}
+#+end_src
+
+** Compile-Time Reflection and Type Introspection
+
+Zig provides powerful tools for type introspection:
+
+#+begin_src zig
+const std = @import("std");
+
+// Sample struct to reflect on
+const Person = struct {
+    name: []const u8,
+    age: u32,
+    active: bool,
+    
+    pub fn init(name: []const u8, age: u32) Person {
+        return Person{
+            .name = name,
+            .age = age,
+            .active = true,
+        };
+    }
+};
+
+// Generic function to print all fields of any struct
+fn debugPrint(value: anytype) void {
+    const T = @TypeOf(value);
+    const info = @typeInfo(T);
+    
+    // Ensure we're dealing with a struct
+    if (info != .Struct) {
+        std.debug.print("Not a struct: {}\n", .{@typeName(T)});
+        return;
+    }
+    
+    const struct_info = info.Struct;
+    
+    std.debug.print("Type: {s}\n", .{@typeName(T)});
+    std.debug.print("Fields:\n", .{});
+    
+    // Iterate over all fields in the struct at compile time
+    inline for (struct_info.fields) |field| {
+        // Get the field value using @field
+        const field_value = @field(value, field.name);
+        
+        // Handle different field types
+        switch (@TypeOf(field_value)) {
+            []const u8 => std.debug.print("  {s}: \"{s}\"\n", .{field.name, field_value}),
+            u32, i32, usize, isize => std.debug.print("  {s}: {}\n", .{field.name, field_value}),
+            bool => std.debug.print("  {s}: {}\n", .{field.name, field_value}),
+            else => std.debug.print("  {s}: (complex type)\n", .{field.name}),
+        }
+    }
+}
+
+// Generate a JSON serializer for any struct type
+fn Serializer(comptime T: type) type {
+    return struct {
+        // Static function to serialize a value of type T to JSON
+        pub fn toJson(value: T, allocator: std.mem.Allocator) ![]const u8 {
+            const info = @typeInfo(T);
+            if (info != .Struct) @compileError("Can only serialize structs");
+            
+            var json = std.ArrayList(u8).init(allocator);
+            defer json.deinit();
+            
+            try json.append('{');
+            
+            const fields = info.Struct.fields;
+            comptime var first = true;
+            
+            // Process each field at compile time
+            inline for (fields) |field| {
+                if (!first) {
+                    try json.appendSlice(", ");
+                }
+                first = false;
+                
+                // Add field name
+                try json.appendSlice("\"");
+                try json.appendSlice(field.name);
+                try json.appendSlice("\": ");
+                
+                // Get field value
+                const field_value = @field(value, field.name);
+                
+                // Handle different field types
+                switch (@TypeOf(field_value)) {
+                    []const u8 => {
+                        try json.appendSlice("\"");
+                        try json.appendSlice(field_value);
+                        try json.appendSlice("\"");
+                    },
+                    u32, i32, usize, isize => {
+                        var buf: [20]u8 = undefined;
+                        const slice = try std.fmt.bufPrint(&buf, "{}", .{field_value});
+                        try json.appendSlice(slice);
+                    },
+                    bool => {
+                        if (field_value) {
+                            try json.appendSlice("true");
+                        } else {
+                            try json.appendSlice("false");
+                        }
+                    },
+                    else => @compileError("Unsupported field type"),
+                }
+            }
+            
+            try json.append('}');
+            
+            return json.toOwnedSlice();
+        }
+    };
+}
+
+pub fn main() !void {
+    // Create a person instance
+    const person = Person.init("Alan Turing", 41);
+    
+    // Print all fields using reflection
+    debugPrint(person);
+    
+    // Use the generated serializer
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    
+    const PersonSerializer = Serializer(Person);
+    const json = try PersonSerializer.toJson(person, gpa.allocator());
+    defer gpa.allocator().free(json);
+    
+    std.debug.print("\nJSON: {s}\n", .{json});
+}
+#+end_src
+
+** Zero-Cost Foreign Function Interface (FFI)
+
+Zig excels at interoperating with C and other languages:
+
+#+begin_src zig
+const std = @import("std");
+
+// Define C function interfaces
+const c = struct {
+    extern "c" fn printf(format: [*:0]const u8, ...) c_int;
+    
+    // Imagined C library functions
+    extern "c" fn add(a: c_int, b: c_int) c_int;
+    extern "c" fn create_buffer(size: c_int) ?[*]u8;
+    extern "c" fn free_buffer(ptr: [*]u8) void;
+};
+
+// Safer Zig wrapper around C function
+fn safeAdd(a: i32, b: i32) i32 {
+    return c.add(@intCast(a), @intCast(b));
+}
+
+// Higher-level abstraction over C buffer management
+const Buffer = struct {
+    ptr: [*]u8,
+    size: usize,
+    
+    pub fn create(size: usize) !Buffer {
+        const ptr = c.create_buffer(@intCast(size)) orelse return error.OutOfMemory;
+        return Buffer{
+            .ptr = ptr,
+            .size = size,
+        };
+    }
+    
+    pub fn deinit(self: *Buffer) void {
+        c.free_buffer(self.ptr);
+        self.ptr = undefined;
+        self.size = 0;
+    }
+    
+    pub fn write(self: *Buffer, data: []const u8) !void {
+        if (data.len > self.size) return error.BufferTooSmall;
+        @memcpy(self.ptr[0..data.len], data);
+    }
+    
+    pub fn asSlice(self: Buffer) []u8 {
+        return self.ptr[0..self.size];
+    }
+};
+
+// Export a Zig function to be called from C
+export fn zig_process_data(data: [*]const u8, len: c_int) c_int {
+    const slice = data[0..@intCast(len)];
+    var sum: i32 = 0;
+    
+    for (slice) |byte| {
+        sum += byte;
+    }
+    
+    // Demonstrate calling back into C
+    _ = c.printf("Processed %d bytes with sum: %d\n".ptr, len, sum);
+    
+    return @intCast(sum);
+}
+
+// This function exists only to demonstrate the code, as we can't actually call C functions
+pub fn simulateFFIDemo() !void {
+    std.debug.print("=== FFI Demo ===\n", .{});
+    
+    // Call C function through wrapper
+    const result = safeAdd(5, 10);
+    std.debug.print("5 + 10 = {}\n", .{result});
+    
+    // Use the buffer abstraction
+    var buffer = try Buffer.create(256);
+    defer buffer.deinit();
+    
+    try buffer.write("Hello from Zig!");
+    const slice = buffer.asSlice();
+    
+    std.debug.print("Buffer contains {} bytes\n", .{slice.len});
+    
+    // Demonstrate how C would call back into Zig
+    std.debug.print("C would call zig_process_data() and get result\n", .{});
+}
+
+pub fn main() !void {
+    // In a real program, we'd call actual C functions
+    // Here we just show the structure since we don't have actual C code
+    try simulateFFIDemo();
+    
+    std.debug.print("\nNote: This is a demonstration of the FFI pattern.\n", .{});
+    std.debug.print("In a real program, the C functions would be from actual libraries.\n", .{});
+}
+#+end_src
+
+** Advanced Concurrency with Async/Await
+
+Zig offers a unique take on asynchronous programming:
+
+#+begin_src zig
+const std = @import("std");
+
+// A frame is an allocated stack and other small state for an async function
+fn simpleAsyncFn() callconv(.Async) void {
+    std.debug.print("Started async function\n", .{});
+    suspend {
+        // Execution is suspended here, callsite can resume later
+        std.debug.print("Suspended\n", .{});
+    }
+    std.debug.print("Resumed and completed\n", .{});
+}
+
+// A more complex async function that returns a value
+fn fetchValue(value: u32, delay_ms: u32) callconv(.Async) u32 {
+    std.debug.print("Fetching value: {}\n", .{value});
+    
+    // Simulate work with a suspend point
+    suspend {
+        std.debug.print("Suspended fetch for {}ms\n", .{delay_ms});
+    }
+    
+    // Compute result after resuming
+    const result = value * 2;
+    std.debug.print("Fetch complete, result: {}\n", .{result});
+    return result;
+}
+
+// Async function that awaits multiple operations
+fn processValues() callconv(.Async) !void {
+    std.debug.print("=== Processing Values ===\n", .{});
+    
+    // Start multiple async operations (these would normally use real I/O)
+    var frame1 = async fetchValue(42, 100);
+    var frame2 = async fetchValue(100, 50);
+    
+    // Await their results
+    const result1 = await frame1;
+    const result2 = await frame2;
+    
+    const total = result1 + result2;
+    std.debug.print("Total: {}\n", .{total});
+}
+
+// A simple event loop simulator for demonstration
+fn simulateEventLoop() !void {
+    std.debug.print("=== Event Loop Simulation ===\n", .{});
+    
+    // Create async frames
+    var simple_frame = async simpleAsyncFn();
+    var process_frame = async processValues();
+    
+    // Immediately resume all suspended functions
+    // In a real event loop, we'd wait for events and resume selectively
+    resume simple_frame;
+    resume process_frame;
+    
+    // In a real program, we'd wait for async operations to complete
+    // But since we can't actually wait here, we just demonstrate the concept
+    std.debug.print("\nNote: This is a simplified event loop simulation.\n", .{});
+    std.debug.print("In a real program, we'd wait for I/O events and resume frames accordingly.\n", .{});
+}
+
+pub fn main() !void {
+    try simulateEventLoop();
+}
+#+end_src
+
+** Building a Parser Combinator Library
+
+Demonstrate advanced metaprogramming with a parser combinator:
+
+#+begin_src zig
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+
+// Result type for parsers
+const ParseResult = struct {
+    success: bool,
+    value: []const u8,
+    remaining: []const u8,
+};
+
+// Parser combinator framework
+const Parser = struct {
+    // Parser function type
+    const ParserFn = fn([]const u8) ParseResult;
+    
+    // Core function
+    fn_ptr: ParserFn,
+    
+    // Constructor
+    pub fn init(func: ParserFn) Parser {
+        return Parser{ .fn_ptr = func };
+    }
+    
+    // Run the parser
+    pub fn parse(self: Parser, input: []const u8) ParseResult {
+        return self.fn_ptr(input);
+    }
+    
+    // Combinators
+    pub fn map(self: Parser, comptime func: anytype) Parser {
+        const mapFn = struct {
+            fn parser(input: []const u8) ParseResult {
+                const result = self.parse(input);
+                if (!result.success) return result;
+                
+                return ParseResult{
+                    .success = true,
+                    .value = func(result.value),
+                    .remaining = result.remaining,
+                };
+            }
+        }.parser;
+        
+        return Parser.init(mapFn);
+    }
+    
+    pub fn then(self: Parser, next: Parser) Parser {
+        const thenFn = struct {
+            fn parser(input: []const u8) ParseResult {
+                const result1 = self.parse(input);
+                if (!result1.success) return result1;
+                
+                const result2 = next.parse(result1.remaining);
+                if (!result2.success) return result2;
+                
+                return ParseResult{
+                    .success = true,
+                    .value = result2.value,
+                    .remaining = result2.remaining,
+                };
+            }
+        }.parser;
+        
+        return Parser.init(thenFn);
+    }
+    
+    pub fn or(self: Parser, alternative: Parser) Parser {
+        const orFn = struct {
+            fn parser(input: []const u8) ParseResult {
+                const result = self.parse(input);
+                if (result.success) return result;
+                
+                return alternative.parse(input);
+            }
+        }.parser;
+        
+        return Parser.init(orFn);
+    }
+    
+    pub fn many(self: Parser) Parser {
+        const manyFn = struct {
+            fn parser(input: []const u8) ParseResult {
+                var current_input = input;
+                var matched = true;
+                
+                // Try to match as many times as possible
+                while (matched) {
+                    const result = self.parse(current_input);
+                    if (!result.success) {
+                        matched = false;
+                    } else {
+                        current_input = result.remaining;
+                    }
+                }
+                
+                // Calculate what was consumed
+                const consumed_len = input.len - current_input.len;
+                
+                return ParseResult{
+                    .success = true,
+                    .value = input[0..consumed_len],
+                    .remaining = current_input,
+                };
+            }
+        }.parser;
+        
+        return Parser.init(manyFn);
+    }
+};
+
+// Basic parsers
+fn charP(expected: u8) Parser {
+    const charFn = struct {
+        fn parser(input: []const u8) ParseResult {
+            if (input.len == 0) {
+                return ParseResult{
+                    .success = false,
+                    .value = "",
+                    .remaining = input,
+                };
+            }
+            
+            if (input[0] == expected) {
+                return ParseResult{
+                    .success = true,
+                    .value = input[0..1],
+                    .remaining = input[1..],
+                };
+            }
+            
+            return ParseResult{
+                .success = false,
+                .value = "",
+                .remaining = input,
+            };
+        }
+    }.parser;
+    
+    return Parser.init(charFn);
+}
+
+fn stringP(expected: []const u8) Parser {
+    const stringFn = struct {
+        fn parser(input: []const u8) ParseResult {
+            if (input.len < expected.len) {
+                return ParseResult{
+                    .success = false,
+                    .value = "",
+                    .remaining = input,
+                };
+            }
+            
+            const potential_match = input[0..expected.len];
+            
+            if (std.mem.eql(u8, potential_match, expected)) {
+                return ParseResult{
+                    .success = true,
+                    .value = potential_match,
+                    .remaining = input[expected.len..],
+                };
+            }
+            
+            return ParseResult{
+                .success = false,
+                .value = "",
+                .remaining = input,
+            };
+        }
+    }.parser;
+    
+    return Parser.init(stringFn);
+}
+
+fn digitP() Parser {
+    const digitFn = struct {
+        fn parser(input: []const u8) ParseResult {
+            if (input.len == 0) {
+                return ParseResult{
+                    .success = false,
+                    .value = "",
+                    .remaining = input,
+                };
+            }
+            
+            if (input[0] >= '0' and input[0] <= '9') {
+                return ParseResult{
+                    .success = true,
+                    .value = input[0..1],
+                    .remaining = input[1..],
+                };
+            }
+            
+            return ParseResult{
+                .success = false,
+                .value = "",
+                .remaining = input,
+            };
+        }
+    }.parser;
+    
+    return Parser.init(digitFn);
+}
+
+// Demo of parser combinators
+pub fn main() !void {
+    // Basic parsers
+    const digit = digitP();
+    const hello = stringP("hello");
+    const world = stringP("world");
+    const comma = charP(',');
+    const space = charP(' ');
+    
+    // Combined parsers
+    const digits = digit.many();
+    const hello_world = hello.then(space).then(world);
+    const hello_or_world = hello.or(world);
+    
+    // Test some inputs
+    const tests = [_]struct {
+        name: []const u8,
+        parser: Parser,
+        input: []const u8,
+    }{
+        .{ .name = "digit", .parser = digit, .input = "5abc" },
+        .{ .name = "digits", .parser = digits, .input = "12345abc" },
+        .{ .name = "hello", .parser = hello, .input = "hello world" },
+        .{ .name = "hello_world", .parser = hello_world, .input = "hello world!" },
+        .{ .name = "hello_or_world (hello)", .parser = hello_or_world, .input = "hello!" },
+        .{ .name = "hello_or_world (world)", .parser = hello_or_world, .input = "world!" },
+    };
+    
+    std.debug.print("=== Parser Combinator Demo ===\n", .{});
+    
+    for (tests) |test| {
+        const result = test.parser.parse(test.input);
+        std.debug.print("Parser: {s}\n", .{test.name});
+        std.debug.print("  Input: \"{s}\"\n", .{test.input});
+        std.debug.print("  Success: {}\n", .{result.success});
+        if (result.success) {
+            std.debug.print("  Matched: \"{s}\"\n", .{result.value});
+            std.debug.print("  Remaining: \"{s}\"\n", .{result.remaining});
+        }
+        std.debug.print("\n", .{});
+    }
+}
+#+end_src
+
+** Advanced Memory Management Techniques
+
+Zig provides tools for precise control over memory:
+
+#+begin_src zig
+const std = @import("std");
+
+// Structure with custom alignment requirements
+const AlignedStruct = struct {
+    // Aligned to cache line size for better performance
+    x: u64 align(64),
+    y: u64,
+    z: u64,
+};
+
+// Structure with packed layout for memory efficiency
+const PackedStruct = packed struct {
+    // Use exact bit widths to minimize memory usage
+    flag1: bool,
+    flag2: bool,
+    flag3: bool,
+    mode: u5,
+    reserved: u8,
+};
+
+// Custom allocator that logs allocations
+const LoggingAllocator = struct {
+    parent_allocator: std.mem.Allocator,
+    allocation_count: usize,
+    
+    pub fn init(parent_allocator: std.mem.Allocator) LoggingAllocator {
+        return LoggingAllocator{
+            .parent_allocator = parent_allocator,
+            .allocation_count = 0,
+        };
+    }
+    
+    pub fn allocator(self: *LoggingAllocator) std.mem.Allocator {
+        return std.mem.Allocator.init(
+            self,
+            alloc,
+            resize,
+            free,
+        );
+    }
+    
+    fn alloc(
+        self: *LoggingAllocator,
+        len: usize,
+        ptr_align: u8,
+        len_align: usize,
+        ret_addr: usize,
+    ) ![]u8 {
+        const result = try self.parent_allocator.rawAlloc(len, ptr_align, len_align, ret_addr);
+        self.allocation_count += 1;
+        std.debug.print("Allocation #{}: {} bytes at {*}\n", .{
+            self.allocation_count,
+            len,
+            result.ptr,
+        });
+        return result;
+    }
+    
+    fn resize(
+        self: *LoggingAllocator,
+        buf: []u8,
+        buf_align: u8,
+        new_len: usize,
+        len_align: usize,
+        ret_addr: usize,
+    ) ?usize {
+        std.debug.print("Resize: {} bytes to {} bytes at {*}\n", .{
+            buf.len,
+            new_len,
+            buf.ptr,
+        });
+        return self.parent_allocator.rawResize(buf, buf_align, new_len, len_align, ret_addr);
+    }
+    
+    fn free(
+        self: *LoggingAllocator,
+        buf: []u8,
+        buf_align: u8,
+        ret_addr: usize,
+    ) void {
+        std.debug.print("Free: {} bytes at {*}\n", .{
+            buf.len,
+            buf.ptr,
+        });
+        self.parent_allocator.rawFree(buf, buf_align, ret_addr);
+    }
+};
+
+// Demo of advanced memory techniques
+pub fn main() !void {
+    std.debug.print("=== Advanced Memory Management Demo ===\n\n", .{});
+    
+    // 1. Alignment demonstration
+    std.debug.print("Memory Alignment:\n", .{});
+    var aligned = AlignedStruct{
+        .x = 1,
+        .y = 2,
+        .z = 3,
+    };
+    
+    std.debug.print("AlignedStruct size: {} bytes\n", .{@sizeOf(AlignedStruct)});
+    std.debug.print("x address: {*} (alignment: {})\n", .{&aligned.x, @alignOf(@TypeOf(aligned.x))});
+    std.debug.print("y address: {*} (alignment: {})\n", .{&aligned.y, @alignOf(@TypeOf(aligned.y))});
+    std.debug.print("z address: {*} (alignment: {})\n\n", .{&aligned.z, @alignOf(@TypeOf(aligned.z))});
+    
+    // 2. Packed struct demonstration
+    std.debug.print("Packed Structures:\n", .{});
+    var packed = PackedStruct{
+        .flag1 = true,
+        .flag2 = false,
+        .flag3 = true,
+        .mode = 16,
+        .reserved = 0,
+    };
+    
+    std.debug.print("PackedStruct size: {} bytes\n", .{@sizeOf(PackedStruct)});
+    std.debug.print("Individual bits stored: {}\n", .{1 + 1 + 1 + 5 + 8});
+    std.debug.print("Values: flag1={}, flag2={}, flag3={}, mode={}\n\n", 
+        .{packed.flag1, packed.flag2, packed.flag3, packed.mode});
+    
+    // 3. Custom allocator demonstration
+    std.debug.print("Custom Allocator:\n", .{});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    
+    var logging_allocator = LoggingAllocator.init(gpa.allocator());
+    const allocator = logging_allocator.allocator();
+    
+    // Allocate memory
+    const buffer1 = try allocator.alloc(u8, 128);
+    defer allocator.free(buffer1);
+    
+    const buffer2 = try allocator.alloc(u32, 64);
+    defer allocator.free(buffer2);
+    
+    // Resize
+    const resized = try allocator.realloc(buffer1, 256);
+    
+    std.debug.print("\nTotal allocations: {}\n", .{logging_allocator.allocation_count});
+}
+#+end_src
+
+* Further Reading
+
+- [The Zig Programming Language](https://ziglang.org/)
+- [Zig Documentation](https://ziglang.org/documentation/master/)
+- [Zig Standard Library](https://ziglang.org/documentation/master/std/)
+- [Zig Compiler Internals](https://ziglang.org/documentation/master/internals.html)
