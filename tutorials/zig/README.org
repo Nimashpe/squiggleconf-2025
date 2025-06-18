@@ -22,7 +22,7 @@ Run ~gmake help~ for available tooling options.
 
 Zig's comptime is a powerful feature that enables computation during compilation:
 
-#+begin_src zig
+#+begin_src zig :tangle src/comptime_example.zig
 const std = @import("std");
 
 // Type-level function that generates array types
@@ -78,7 +78,7 @@ pub fn main() !void {
 
 Zig's error handling is explicit and composable:
 
-#+begin_src zig
+#+begin_src zig :tangle src/error_handling.zig
 const std = @import("std");
 
 // Define custom error sets
@@ -150,7 +150,7 @@ pub fn main() void {
 
 Zig gives explicit control over memory allocation strategies:
 
-#+begin_src zig
+#+begin_src zig :tangle src/memory_management.zig
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
@@ -236,7 +236,7 @@ pub fn main() !void {
 
 Zig provides powerful tools for type introspection:
 
-#+begin_src zig
+#+begin_src zig :tangle src/reflection.zig
 const std = @import("std");
 
 // Sample struct to reflect on
@@ -369,7 +369,7 @@ pub fn main() !void {
 
 Zig excels at interoperating with C and other languages:
 
-#+begin_src zig
+#+begin_src zig :tangle src/ffi_example.zig
 const std = @import("std");
 
 // Define C function interfaces
@@ -466,7 +466,7 @@ pub fn main() !void {
 
 Zig offers a unique take on asynchronous programming:
 
-#+begin_src zig
+#+begin_src zig :tangle src/async_await.zig
 const std = @import("std");
 
 // A frame is an allocated stack and other small state for an async function
@@ -538,7 +538,7 @@ pub fn main() !void {
 
 Demonstrate advanced metaprogramming with a parser combinator:
 
-#+begin_src zig
+#+begin_src zig :tangle src/parser_combinator.zig
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
@@ -790,7 +790,7 @@ pub fn main() !void {
 
 Zig provides tools for precise control over memory:
 
-#+begin_src zig
+#+begin_src zig :tangle src/memory_techniques.zig
 const std = @import("std");
 
 // Structure with custom alignment requirements

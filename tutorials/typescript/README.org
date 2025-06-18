@@ -1,0 +1,1662 @@
+#+TITLE: Advanced TypeScript for Systems Architecture
+#+AUTHOR: SquiggleConf 2025 Team
+#+DATE: <2025-06-18 Wed>
+#+STARTUP: overview
+#+PROPERTY: header-args:typescript :results output
+
+* TypeScript for Staff+ & Principal Engineers
+
+This tutorial focuses on advanced TypeScript techniques for building robust developer tools, type systems, and enterprise architectures.
+
+** Type System Internals & Extensions
+
+Understanding and extending TypeScript's type system:
+
+#+begin_src typescript :tangle src/type_manipulator.ts
+// Advanced TypeScript type manipulation for staff+ engineers
+// Techniques for building powerful domain-specific type systems
+
+// Deep readonly type that preserves exact shape
+type DeepReadonly<T> = {
+  readonly [P in keyof T]: T[P] extends object 
+    ? T[P] extends Function 
+      ? T[P] 
+      : DeepReadonly<T[P]> 
+    : T[P]
+}
+
+// Deep partial with exact type preservation
+type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object
+    ? T[P] extends Function
+      ? T[P]
+      : DeepPartial<T[P]>
+    : T[P]
+}
+
+// Path-based property access for type-safe record traversal
+type Path<T> = T extends object
+  ? { [K in keyof T]: [K] | [K, ...Path<T[K]>] }[keyof T]
+  : never
+
+type PathValue<T, P extends Path<T>> = P extends [infer K]
+  ? K extends keyof T
+    ? T[K]
+    : never
+  : P extends [infer K, ...infer Rest]
+    ? K extends keyof T
+      ? Rest extends Path<T[K]>
+        ? PathValue<T[K], Rest>
+        : never
+      : never
+    : never
+
+// Type-safe record getter
+function getPath<T, P extends Path<T>>(obj: T, path: P): PathValue<T, P> {
+  return path.reduce((acc, key) => acc[key], obj as any) as PathValue<T, P>
+}
+
+// Branded types for compile-time nominal typing
+declare const brand: unique symbol
+type Brand<T, B> = T & { [brand]: B }
+
+type UserId = Brand<string, "UserId">
+type OrderId = Brand<string, "OrderId">
+
+// Type-safe branding functions
+function brandUserId(id: string): UserId {
+  // Runtime validation would go here
+  return id as UserId
+}
+
+function brandOrderId(id: string): OrderId {
+  // Runtime validation would go here
+  return id as OrderId
+}
+
+// Sample usage
+interface User {
+  id: UserId
+  name: string
+  permissions: {
+    roles: string[]
+    features: {
+      admin: boolean
+      developer: boolean
+    }
+  }
+  orders: OrderId[]
+}
+
+// Type registry for code generation systems
+class TypeRegistry<Base = any> {
+  private types = new Map<string, Record<string, any>>()
+
+  register<T extends Base>(name: string, shape: T) {
+    this.types.set(name, shape)
+    return this
+  }
+
+  get<T extends Base>(name: string): T {
+    const type = this.types.get(name)
+    if (!type) throw new Error(`Type ${name} not registered`)
+    return type as T
+  }
+
+  generateTypeDefinitions(): string {
+    let output = ""
+    
+    for (const [name, shape] of this.types.entries()) {
+      output += `export interface ${name} {\n`
+      
+      for (const [key, value] of Object.entries(shape)) {
+        const typeStr = this.getTypeString(value)
+        output += `  ${key}: ${typeStr};\n`
+      }
+      
+      output += "}\n\n"
+    }
+    
+    return output
+  }
+
+  private getTypeString(value: any): string {
+    if (value === null) return "null"
+    
+    switch (typeof value) {
+      case "string":
+        return "string"
+      case "number":
+        return "number"
+      case "boolean":
+        return "boolean"
+      case "object":
+        if (Array.isArray(value)) {
+          if (value.length === 0) return "any[]"
+          return `${this.getTypeString(value[0])}[]`
+        }
+        
+        const entries = Object.entries(value)
+        if (entries.length === 0) return "{}"
+        
+        return `{\n${entries
+          .map(([k, v]) => `    ${k}: ${this.getTypeString(v)}`)
+          .join(";\n")}\n  }`
+      default:
+        return "any"
+    }
+  }
+}
+
+// Demonstration
+function demo() {
+  // Using branded types
+  const userId = brandUserId("user-123")
+  const orderId = brandOrderId("order-456")
+  
+  // This would cause a type error:
+  // const badUsage: UserId = orderId
+  
+  // Create a user with nested structure
+  const user: User = {
+    id: userId,
+    name: "Alice",
+    permissions: {
+      roles: ["admin", "user"],
+      features: {
+        admin: true,
+        developer: true
+      }
+    },
+    orders: [orderId]
+  }
+  
+  // Use path-based access with type safety
+  const isAdmin = getPath(user, ["permissions", "features", "admin"])
+  console.log(`User is admin: ${isAdmin}`)
+  
+  // This would cause a type error (path doesn't exist):
+  // const invalid = getPath(user, ["permissions", "nonexistent"])
+  
+  // Type registry for code generation
+  const registry = new TypeRegistry()
+  
+  registry
+    .register("Product", {
+      id: "",
+      name: "",
+      price: 0,
+      tags: [""]
+    })
+    .register("Order", {
+      id: "",
+      products: [{ id: "", quantity: 0 }],
+      customer: {
+        id: "",
+        name: ""
+      }
+    })
+  
+  console.log("Generated type definitions:")
+  console.log(registry.generateTypeDefinitions())
+}
+
+demo()
+#+end_src
+
+** Compiler API for Custom Tooling
+
+Building developer tools using TypeScript's compiler API:
+
+#+begin_src typescript :tangle src/compiler_explorer.ts
+import * as ts from 'typescript'
+import * as fs from 'fs'
+import * as path from 'path'
+
+/**
+ * Advanced compiler API usage for building developer tools
+ * Staff+ engineers need deep knowledge of the compiler for building:
+ * - Custom linters
+ * - Code generators
+ * - Migration tools
+ * - Code analyzers
+ */
+
+// Custom transformer that inserts performance instrumentation
+function createPerformanceTransformer(context: ts.TransformationContext) {
+  return (sourceFile: ts.SourceFile): ts.SourceFile => {
+    // Skip declaration files
+    if (sourceFile.isDeclarationFile) {
+      return sourceFile
+    }
+
+    function visit(node: ts.Node): ts.Node {
+      // Only instrument function declarations and method declarations
+      if (ts.isFunctionDeclaration(node) && node.body) {
+        return instrumentFunction(node)
+      } else if (ts.isMethodDeclaration(node) && node.body) {
+        return instrumentMethod(node)
+      }
+
+      return ts.visitEachChild(node, visit, context)
+    }
+
+    function instrumentFunction(node: ts.FunctionDeclaration): ts.FunctionDeclaration {
+      const funcName = node.name?.text || 'anonymous'
+      return instrumentFunctionLike(node, funcName)
+    }
+
+    function instrumentMethod(node: ts.MethodDeclaration): ts.MethodDeclaration {
+      let className = 'UnknownClass'
+      
+      // Try to determine the class name
+      let parent = node.parent
+      while (parent) {
+        if (ts.isClassDeclaration(parent) && parent.name) {
+          className = parent.name.text
+          break
+        }
+        parent = parent.parent
+      }
+      
+      const methodName = node.name.getText()
+      return instrumentFunctionLike(node, `${className}.${methodName}`) as ts.MethodDeclaration
+    }
+
+    function instrumentFunctionLike<T extends ts.FunctionDeclaration | ts.MethodDeclaration>(
+      node: T,
+      name: string
+    ): T {
+      // Create performance tracking statements
+      const startVar = ts.factory.createUniqueName('_perf_start')
+      const startStatement = ts.factory.createVariableStatement(
+        undefined,
+        ts.factory.createVariableDeclarationList(
+          [ts.factory.createVariableDeclaration(
+            startVar,
+            undefined,
+            undefined,
+            ts.factory.createCallExpression(
+              ts.factory.createPropertyAccessExpression(
+                ts.factory.createIdentifier('performance'),
+                'now'
+              ),
+              undefined,
+              []
+            )
+          )],
+          ts.NodeFlags.Const
+        )
+      )
+
+      // Create try-finally to ensure timing is always recorded
+      const tryBlock = ts.factory.createBlock(
+        [...(node.body?.statements || [])],
+        true
+      )
+
+      const finallyBlock = ts.factory.createBlock([
+        ts.factory.createExpressionStatement(
+          ts.factory.createCallExpression(
+            ts.factory.createPropertyAccessExpression(
+              ts.factory.createIdentifier('console'),
+              'log'
+            ),
+            undefined,
+            [
+              ts.factory.createTemplateExpression(
+                ts.factory.createTemplateHead(`Performance: ${name} took `),
+                [
+                  ts.factory.createTemplateSpan(
+                    ts.factory.createBinaryExpression(
+                      ts.factory.createCallExpression(
+                        ts.factory.createPropertyAccessExpression(
+                          ts.factory.createIdentifier('performance'),
+                          'now'
+                        ),
+                        undefined,
+                        []
+                      ),
+                      ts.SyntaxKind.MinusToken,
+                      startVar
+                    ),
+                    ts.factory.createTemplateTail(' ms')
+                  )
+                ]
+              )
+            ]
+          )
+        )
+      ])
+
+      // Create new body with instrumentation
+      const newBody = ts.factory.createBlock(
+        [
+          startStatement,
+          ts.factory.createTryStatement(
+            tryBlock,
+            undefined,
+            finallyBlock
+          )
+        ],
+        true
+      )
+
+      // Return a new function with the instrumented body
+      return ts.factory.updateFunctionDeclaration(
+        node as ts.FunctionDeclaration,
+        node.decorators,
+        node.modifiers,
+        node.asteriskToken,
+        node.name,
+        node.typeParameters,
+        node.parameters,
+        node.type,
+        newBody
+      ) as T
+    }
+
+    return ts.visitEachChild(sourceFile, visit, context)
+  }
+}
+
+// Type checker that finds and reports complex type issues
+class ComplexTypeAnalyzer {
+  private typeChecker: ts.TypeChecker
+  private sourceFile: ts.SourceFile
+  private issues: { message: string; node: ts.Node }[] = []
+
+  constructor(program: ts.Program, sourceFile: ts.SourceFile) {
+    this.typeChecker = program.getTypeChecker()
+    this.sourceFile = sourceFile
+  }
+
+  analyze(): { message: string; line: number; column: number }[] {
+    this.visit(this.sourceFile)
+    
+    return this.issues.map(issue => {
+      const { line, character } = this.sourceFile.getLineAndCharacterOfPosition(issue.node.getStart())
+      return {
+        message: issue.message,
+        line: line + 1,
+        column: character + 1
+      }
+    })
+  }
+
+  private visit(node: ts.Node) {
+    // Check for complex type assertions
+    if (ts.isAsExpression(node)) {
+      this.checkTypeAssertion(node)
+    }
+    
+    // Check for complex generic instantiations
+    if (ts.isTypeReferenceNode(node) && node.typeArguments && node.typeArguments.length > 3) {
+      this.checkComplexGeneric(node)
+    }
+    
+    // Check for complex conditional types
+    if (ts.isConditionalTypeNode && ts.isConditionalTypeNode(node)) {
+      this.checkConditionalType(node)
+    }
+
+    // Check for complex mapped types
+    if (ts.isMappedTypeNode && ts.isMappedTypeNode(node)) {
+      this.checkMappedType(node)
+    }
+    
+    // Recursively visit all children
+    node.forEachChild(child => this.visit(child))
+  }
+
+  private checkTypeAssertion(node: ts.AsExpression) {
+    const targetType = this.typeChecker.getTypeAtLocation(node.type)
+    const sourceType = this.typeChecker.getTypeAtLocation(node.expression)
+    
+    // Check if this is a potentially unsafe assertion
+    if (!this.typeChecker.isTypeAssignableTo(sourceType, targetType) && 
+        !this.typeChecker.isTypeAssignableTo(targetType, sourceType)) {
+      this.issues.push({
+        message: `Potentially unsafe type assertion from ${this.typeChecker.typeToString(sourceType)} to ${this.typeChecker.typeToString(targetType)}`,
+        node
+      })
+    }
+  }
+
+  private checkComplexGeneric(node: ts.TypeReferenceNode) {
+    this.issues.push({
+      message: `Complex generic type with ${node.typeArguments!.length} type arguments may affect readability`,
+      node
+    })
+  }
+
+  private checkConditionalType(node: ts.ConditionalTypeNode) {
+    // Check for nested conditional types
+    let nestedLevel = 0
+    const countNesting = (n: ts.Node): void => {
+      if (ts.isConditionalTypeNode(n)) {
+        nestedLevel++
+      }
+      n.forEachChild(countNesting)
+    }
+    
+    countNesting(node.extendsType)
+    countNesting(node.trueType)
+    countNesting(node.falseType)
+    
+    if (nestedLevel > 2) {
+      this.issues.push({
+        message: `Complex conditional type with ${nestedLevel} nested conditions may affect readability and compilation performance`,
+        node
+      })
+    }
+  }
+
+  private checkMappedType(node: ts.MappedTypeNode) {
+    // Check for complex mapped types
+    const hasConditional = this.hasConditionalType(node.type)
+    
+    if (hasConditional) {
+      this.issues.push({
+        message: `Complex mapped type with conditional mapping may affect type inference performance`,
+        node
+      })
+    }
+  }
+
+  private hasConditionalType(node?: ts.Node): boolean {
+    if (!node) return false
+    if (ts.isConditionalTypeNode(node)) return true
+    
+    let found = false
+    node.forEachChild(child => {
+      if (this.hasConditionalType(child)) {
+        found = true
+      }
+    })
+    
+    return found
+  }
+}
+
+// Usage example
+function runCompilerAPIDemo(filePath: string) {
+  console.log(`Analyzing and transforming file: ${filePath}`)
+  
+  // Read the source file
+  const fileContents = fs.readFileSync(filePath, 'utf-8')
+  
+  // Create compiler options
+  const compilerOptions: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ESNext,
+    module: ts.ModuleKind.ESNext,
+    strict: true,
+  }
+  
+  // Create virtual filesystem and compiler host
+  const host = ts.createCompilerHost(compilerOptions)
+  
+  // Create a program
+  const program = ts.createProgram([filePath], compilerOptions, host)
+  
+  // Get the source file
+  const sourceFile = program.getSourceFile(filePath)
+  if (!sourceFile) {
+    console.error(`Could not find source file: ${filePath}`)
+    return
+  }
+  
+  // Analyze the file for complex types
+  console.log(`\nRunning complex type analysis:`)
+  const analyzer = new ComplexTypeAnalyzer(program, sourceFile)
+  const issues = analyzer.analyze()
+  
+  if (issues.length === 0) {
+    console.log(`No complex type issues found`)
+  } else {
+    issues.forEach(issue => {
+      console.log(`Line ${issue.line}, Column ${issue.column}: ${issue.message}`)
+    })
+  }
+  
+  // Transform the file to add performance instrumentation
+  console.log(`\nTransforming code to add performance instrumentation:`)
+  const result = ts.transform(sourceFile, [createPerformanceTransformer])
+  const printer = ts.createPrinter()
+  const transformedCode = printer.printFile(result.transformed[0] as ts.SourceFile)
+  
+  // Output path for transformed file
+  const outputPath = path.join(
+    path.dirname(filePath),
+    `${path.basename(filePath, path.extname(filePath))}.instrumented${path.extname(filePath)}`
+  )
+  
+  // Write the transformed file
+  fs.writeFileSync(outputPath, transformedCode)
+  console.log(`Transformed code written to: ${outputPath}`)
+}
+
+// If run directly
+if (require.main === module) {
+  const filePath = process.argv[2]
+  if (!filePath) {
+    console.error('Please provide a file path to analyze')
+    process.exit(1)
+  }
+  
+  runCompilerAPIDemo(filePath)
+}
+#+end_src
+
+** Building Advanced Type-Safe APIs
+
+Patterns for building powerful, type-safe APIs:
+
+#+begin_src typescript :tangle src/builder_pattern.ts
+/**
+ * Advanced type-safe API design patterns
+ * Techniques used by principal engineers to design extensible APIs
+ */
+
+// TypeScript builder pattern with full type inference and fluent API
+class QueryBuilder<
+  Entity extends Record<string, any>,
+  Selected extends keyof Entity = keyof Entity,
+  Filtered extends Partial<Record<keyof Entity, any>> = {},
+  Sorted extends Array<[keyof Entity, 'asc' | 'desc']> = []
+> {
+  private selectedFields: Selected[] = [] as unknown as Selected[]
+  private filters: Filtered = {} as Filtered
+  private sorts: Sorted = [] as unknown as Sorted
+  private limitValue?: number
+  private offsetValue?: number
+
+  // Select specific fields
+  select<F extends keyof Entity>(
+    ...fields: F[]
+  ): QueryBuilder<Entity, F, Filtered, Sorted> {
+    return new QueryBuilder<Entity, F, Filtered, Sorted>()
+      .withSelectedFields(fields as unknown as Selected[])
+      .withFilters(this.filters)
+      .withSorts(this.sorts)
+      .withLimit(this.limitValue)
+      .withOffset(this.offsetValue)
+  }
+
+  // Add a filter condition
+  where<F extends keyof Entity, V extends Entity[F]>(
+    field: F,
+    value: V
+  ): QueryBuilder<Entity, Selected, Filtered & Record<F, V>, Sorted> {
+    const newFilters = {
+      ...this.filters,
+      [field]: value
+    } as Filtered & Record<F, V>
+
+    return new QueryBuilder<Entity, Selected, Filtered & Record<F, V>, Sorted>()
+      .withSelectedFields(this.selectedFields)
+      .withFilters(newFilters)
+      .withSorts(this.sorts)
+      .withLimit(this.limitValue)
+      .withOffset(this.offsetValue)
+  }
+
+  // Add a sort directive
+  orderBy<F extends keyof Entity>(
+    field: F,
+    direction: 'asc' | 'desc' = 'asc'
+  ): QueryBuilder<Entity, Selected, Filtered, [...Sorted, [F, 'asc' | 'desc']]> {
+    const newSorts = [
+      ...this.sorts,
+      [field, direction]
+    ] as unknown as [...Sorted, [F, 'asc' | 'desc']]
+
+    return new QueryBuilder<Entity, Selected, Filtered, [...Sorted, [F, 'asc' | 'desc']]>()
+      .withSelectedFields(this.selectedFields)
+      .withFilters(this.filters)
+      .withSorts(newSorts)
+      .withLimit(this.limitValue)
+      .withOffset(this.offsetValue)
+  }
+
+  // Add pagination
+  limit(value: number): this {
+    this.limitValue = value
+    return this
+  }
+
+  offset(value: number): this {
+    this.offsetValue = value
+    return this
+  }
+
+  // Internal methods to clone state
+  private withSelectedFields(fields: Selected[]): this {
+    this.selectedFields = fields
+    return this
+  }
+
+  private withFilters(filters: Filtered): this {
+    this.filters = filters
+    return this
+  }
+
+  private withSorts(sorts: Sorted): this {
+    this.sorts = sorts
+    return this
+  }
+
+  private withLimit(limit?: number): this {
+    this.limitValue = limit
+    return this
+  }
+
+  private withOffset(offset?: number): this {
+    this.offsetValue = offset
+    return this
+  }
+
+  // Execute the query and return results with inferred type
+  async execute(): Promise<
+    { [K in Selected]: Entity[K] }[]
+  > {
+    // In a real implementation, this would make a DB call
+    console.log('Executing query with:')
+    console.log('Selected fields:', this.selectedFields)
+    console.log('Filters:', this.filters)
+    console.log('Sorts:', this.sorts)
+    console.log('Limit:', this.limitValue)
+    console.log('Offset:', this.offsetValue)
+
+    // Return mock data
+    return [] as unknown as { [K in Selected]: Entity[K] }[]
+  }
+
+  // Build a query string (for debugging or use with raw queries)
+  toSql(): string {
+    const selectClause = this.selectedFields.length > 0
+      ? this.selectedFields.join(', ')
+      : '*'
+
+    const whereConditions = Object.entries(this.filters)
+      .map(([field, value]) => {
+        if (typeof value === 'string') {
+          return `${field} = '${value}'`
+        }
+        return `${field} = ${value}`
+      })
+      .join(' AND ')
+
+    const whereClause = whereConditions ? `WHERE ${whereConditions}` : ''
+
+    const orderClause = this.sorts.length > 0
+      ? `ORDER BY ${this.sorts
+          .map(([field, direction]) => `${field} ${direction}`)
+          .join(', ')}`
+      : ''
+
+    const limitClause = this.limitValue ? `LIMIT ${this.limitValue}` : ''
+    const offsetClause = this.offsetValue ? `OFFSET ${this.offsetValue}` : ''
+
+    return `SELECT ${selectClause} FROM Entity ${whereClause} ${orderClause} ${limitClause} ${offsetClause}`.trim()
+  }
+}
+
+// Type-safe event emitter with strictly typed events
+interface EventMap {
+  [event: string]: any
+}
+
+class TypedEventEmitter<Events extends EventMap> {
+  private listeners: {
+    [E in keyof Events]?: Array<(data: Events[E]) => void>
+  } = {}
+
+  // Add an event listener
+  on<E extends keyof Events>(event: E, listener: (data: Events[E]) => void): this {
+    if (!this.listeners[event]) {
+      this.listeners[event] = []
+    }
+    this.listeners[event]!.push(listener)
+    return this
+  }
+
+  // Remove an event listener
+  off<E extends keyof Events>(event: E, listener: (data: Events[E]) => void): this {
+    if (!this.listeners[event]) {
+      return this
+    }
+    
+    const idx = this.listeners[event]!.indexOf(listener)
+    if (idx !== -1) {
+      this.listeners[event]!.splice(idx, 1)
+    }
+    return this
+  }
+
+  // Emit an event
+  emit<E extends keyof Events>(event: E, data: Events[E]): boolean {
+    if (!this.listeners[event]) {
+      return false
+    }
+    
+    this.listeners[event]!.forEach(listener => {
+      try {
+        listener(data)
+      } catch (err) {
+        console.error(`Error in listener for event ${String(event)}:`, err)
+      }
+    })
+    
+    return true
+  }
+
+  // Get the count of listeners for an event
+  listenerCount<E extends keyof Events>(event: E): number {
+    return this.listeners[event]?.length || 0
+  }
+}
+
+// Usage demonstration
+function apiDemo() {
+  // Define entity type for our query builder
+  interface User {
+    id: number
+    name: string
+    email: string
+    age: number
+    isActive: boolean
+    role: 'admin' | 'user' | 'guest'
+    createdAt: Date
+  }
+
+  // Create a query
+  const query = new QueryBuilder<User>()
+    .select('name', 'email', 'role')
+    .where('isActive', true)
+    .where('role', 'admin')
+    .orderBy('createdAt', 'desc')
+    .limit(10)
+    .offset(20)
+
+  // Show the generated SQL
+  console.log('\nGenerated query:')
+  console.log(query.toSql())
+
+  // Define event types for our typed event emitter
+  interface AppEvents {
+    'user:login': { userId: number; timestamp: Date }
+    'user:logout': { userId: number; timestamp: Date }
+    'data:updated': { resource: string; ids: number[] }
+    'error': { code: number; message: string }
+  }
+
+  // Create an event emitter
+  const events = new TypedEventEmitter<AppEvents>()
+
+  // Add type-safe event listeners
+  events.on('user:login', ({ userId, timestamp }) => {
+    console.log(`User ${userId} logged in at ${timestamp}`)
+  })
+
+  events.on('error', ({ code, message }) => {
+    console.error(`Error ${code}: ${message}`)
+  })
+
+  // Emit events
+  console.log('\nEmitting events:')
+  events.emit('user:login', { 
+    userId: 123, 
+    timestamp: new Date() 
+  })
+
+  events.emit('error', { 
+    code: 500, 
+    message: 'Internal server error' 
+  })
+
+  // This would cause a type error:
+  // events.emit('user:login', { userId: '123' })
+  // events.emit('unknown-event', {})
+}
+
+apiDemo()
+#+end_src
+
+** Effects, Monads, & Functional Programming
+
+Advanced functional programming techniques:
+
+#+begin_src typescript :tangle src/effect_system.ts
+/**
+ * Implementing an Effect system in TypeScript
+ * For enterprise-scale applications that require robust error handling,
+ * dependency injection, and composition
+ */
+
+// Unique symbol for Effect brand
+const EffectSymbol = Symbol('Effect')
+
+// Effect type for representing computations
+class Effect<R, E, A> {
+  readonly _R!: (_: R) => void
+  readonly _E!: () => E
+  readonly _A!: () => A
+  readonly [EffectSymbol]: true = true
+
+  constructor(readonly run: (env: R) => Promise<Either<E, A>>) {}
+
+  // Functor map
+  map<B>(f: (a: A) => B): Effect<R, E, B> {
+    return new Effect(env =>
+      this.run(env).then(either => either.map(f))
+    )
+  }
+
+  // Applicative ap
+  ap<B>(fab: Effect<R, E, (a: A) => B>): Effect<R, E, B> {
+    return fab.flatMap(f => this.map(f))
+  }
+
+  // Monad flatMap
+  flatMap<R2, E2, B>(
+    f: (a: A) => Effect<R2, E2, B>
+  ): Effect<R & R2, E | E2, B> {
+    return new Effect((env: R & R2) =>
+      this.run(env).then(either =>
+        either.isRight()
+          ? f(either.value).run(env)
+          : Promise.resolve(Either.left(either.value))
+      )
+    )
+  }
+
+  // Recover from errors
+  catchAll<R2, E2, B>(
+    f: (error: E) => Effect<R2, E2, B>
+  ): Effect<R & R2, E2, A | B> {
+    return new Effect((env: R & R2) =>
+      this.run(env).then(either =>
+        either.isLeft()
+          ? f(either.value).run(env)
+          : Promise.resolve(Either.right(either.value))
+      )
+    )
+  }
+
+  // Fold both error and success cases
+  fold<R2, E2, B, C>(
+    onError: (error: E) => Effect<R2, E2, B>,
+    onSuccess: (value: A) => Effect<R2, E2, C>
+  ): Effect<R & R2, E2, B | C> {
+    return this.catchAll(onError).flatMap(onSuccess)
+  }
+
+  // Provide the environment to this effect
+  provide(env: R): Effect<unknown, E, A> {
+    return new Effect(() => this.run(env))
+  }
+
+  // Run the effect with the given environment
+  async runPromise(env: R): Promise<A> {
+    const result = await this.run(env)
+    
+    if (result.isLeft()) {
+      throw result.value
+    }
+    
+    return result.value
+  }
+
+  // Run with a handler for errors
+  async runPromiseEither(env: R): Promise<Either<E, A>> {
+    return this.run(env)
+  }
+
+  // Static combinators
+  static succeed<A>(a: A): Effect<unknown, never, A> {
+    return new Effect(() => Promise.resolve(Either.right(a)))
+  }
+
+  static fail<E>(e: E): Effect<unknown, E, never> {
+    return new Effect(() => Promise.resolve(Either.left(e)))
+  }
+
+  static fromPromise<A, E = unknown>(
+    promise: () => Promise<A>
+  ): Effect<unknown, E, A> {
+    return new Effect(async () => {
+      try {
+        const result = await promise()
+        return Either.right(result)
+      } catch (error) {
+        return Either.left(error as E)
+      }
+    })
+  }
+
+  static access<R, A>(f: (r: R) => A): Effect<R, never, A> {
+    return new Effect(env => Promise.resolve(Either.right(f(env))))
+  }
+
+  static accessM<R, E, A>(f: (r: R) => Effect<R, E, A>): Effect<R, E, A> {
+    return new Effect(env => f(env).run(env))
+  }
+
+  static all<R, E, A>(effects: Effect<R, E, A>[]): Effect<R, E, A[]> {
+    if (effects.length === 0) {
+      return Effect.succeed([])
+    }
+
+    return new Effect(env =>
+      Promise.all(effects.map(effect => effect.run(env))).then(results => {
+        const errors = results.filter(r => r.isLeft())
+        if (errors.length > 0) {
+          return Either.left(errors[0].value)
+        }
+        
+        return Either.right(results.map(r => r.value as A))
+      })
+    )
+  }
+}
+
+// Either type for representing success/failure
+class Either<L, R> {
+  private constructor(
+    readonly isLeft: () => boolean,
+    readonly value: L | R
+  ) {}
+
+  isRight(): boolean {
+    return !this.isLeft()
+  }
+
+  map<B>(f: (r: R) => B): Either<L, B> {
+    return this.isLeft()
+      ? Either.left(this.value as L)
+      : Either.right(f(this.value as R))
+  }
+
+  flatMap<B>(f: (r: R) => Either<L, B>): Either<L, B> {
+    return this.isLeft()
+      ? Either.left(this.value as L)
+      : f(this.value as R)
+  }
+
+  getOrElse<B>(defaultValue: B): R | B {
+    return this.isLeft() ? defaultValue : (this.value as R)
+  }
+
+  fold<B>(onLeft: (l: L) => B, onRight: (r: R) => B): B {
+    return this.isLeft()
+      ? onLeft(this.value as L)
+      : onRight(this.value as R)
+  }
+
+  static left<L, R>(l: L): Either<L, R> {
+    return new Either(() => true, l)
+  }
+
+  static right<L, R>(r: R): Either<L, R> {
+    return new Either(() => false, r)
+  }
+}
+
+// Effect usage example - realistic enterprise-scale application
+async function effectDemo() {
+  // Define error types for better type safety
+  interface DatabaseError {
+    type: 'database'
+    code: number
+    message: string
+  }
+  
+  interface ValidationError {
+    type: 'validation'
+    field: string
+    message: string
+  }
+  
+  interface NotFoundError {
+    type: 'not_found'
+    id: string
+    entity: string
+  }
+  
+  type AppError = DatabaseError | ValidationError | NotFoundError
+  
+  // Define service dependencies
+  interface Logger {
+    log(level: 'info' | 'warn' | 'error', message: string, meta?: Record<string, any>): void
+  }
+  
+  interface Database {
+    query<T>(sql: string, params?: any[]): Promise<T[]>
+    exec(sql: string, params?: any[]): Promise<number>
+  }
+  
+  interface Config {
+    databaseUrl: string
+    apiKeys: string[]
+    features: {
+      audit: boolean
+      metrics: boolean
+    }
+  }
+  
+  // Environment type
+  interface AppEnv {
+    logger: Logger
+    db: Database
+    config: Config
+  }
+  
+  // Domain model
+  interface User {
+    id: string
+    email: string
+    name: string
+    role: string
+    createdAt: Date
+  }
+  
+  // Service layer
+  class UserService {
+    // Get user by ID
+    static getUserById(id: string): Effect<AppEnv, AppError, User> {
+      return Effect.accessM(({ logger, db }: AppEnv) => {
+        logger.log('info', `Getting user with ID: ${id}`)
+        
+        return Effect.fromPromise<User[], DatabaseError>(() => 
+          db.query<User>('SELECT * FROM users WHERE id = ?', [id])
+        ).flatMap(users => {
+          if (users.length === 0) {
+            return Effect.fail<NotFoundError>({
+              type: 'not_found',
+              id,
+              entity: 'user'
+            })
+          }
+          
+          return Effect.succeed(users[0])
+        })
+      })
+    }
+    
+    // Create a new user
+    static createUser(email: string, name: string): Effect<AppEnv, AppError, User> {
+      return Effect.accessM(({ logger, db, config }: AppEnv) => {
+        // Validate input
+        if (!email || !email.includes('@')) {
+          return Effect.fail<ValidationError>({
+            type: 'validation',
+            field: 'email',
+            message: 'Invalid email address'
+          })
+        }
+        
+        if (!name || name.length < 2) {
+          return Effect.fail<ValidationError>({
+            type: 'validation',
+            field: 'name',
+            message: 'Name must be at least 2 characters'
+          })
+        }
+        
+        logger.log('info', `Creating new user: ${email}`)
+        
+        // Generate a new user ID
+        const id = Math.random().toString(36).substring(2, 15)
+        const now = new Date()
+        
+        const user: User = {
+          id,
+          email,
+          name,
+          role: 'user',
+          createdAt: now
+        }
+        
+        // Insert into database
+        return Effect.fromPromise<number, DatabaseError>(() => 
+          db.exec(
+            'INSERT INTO users (id, email, name, role, created_at) VALUES (?, ?, ?, ?, ?)',
+            [id, email, name, 'user', now.toISOString()]
+          )
+        ).map(() => {
+          // Audit logging if enabled
+          if (config.features.audit) {
+            logger.log('info', 'User created', { userId: id, action: 'create' })
+          }
+          
+          return user
+        })
+      })
+    }
+  }
+  
+  // Application layer
+  async function runApplication() {
+    // Mock environment
+    const env: AppEnv = {
+      logger: {
+        log(level, message, meta) {
+          console.log(`[${level.toUpperCase()}] ${message}`, meta || '')
+        }
+      },
+      db: {
+        async query<T>(sql: string, params?: any[]): Promise<T[]> {
+          console.log(`DB Query: ${sql}`, params)
+          
+          // Mock response for demonstration
+          if (sql.includes('WHERE id =') && params && params[0] === '123') {
+            return [{
+              id: '123',
+              email: 'alice@example.com',
+              name: 'Alice',
+              role: 'admin',
+              createdAt: new Date('2025-01-01')
+            }] as unknown as T[]
+          }
+          
+          return [] as T[]
+        },
+        async exec(sql: string, params?: any[]): Promise<number> {
+          console.log(`DB Exec: ${sql}`, params)
+          return 1 // Affected rows
+        }
+      },
+      config: {
+        databaseUrl: 'postgres://localhost:5432/app',
+        apiKeys: ['key1', 'key2'],
+        features: {
+          audit: true,
+          metrics: false
+        }
+      }
+    }
+    
+    console.log('\n=== Getting existing user ===')
+    
+    try {
+      const user = await UserService.getUserById('123').runPromise(env)
+      console.log('Found user:', user)
+    } catch (error) {
+      console.error('Error getting user:', error)
+    }
+    
+    console.log('\n=== Creating new user ===')
+    
+    try {
+      const newUser = await UserService.createUser('bob@example.com', 'Bob').runPromise(env)
+      console.log('Created user:', newUser)
+    } catch (error) {
+      console.error('Error creating user:', error)
+    }
+    
+    console.log('\n=== Validation error example ===')
+    
+    const invalidResult = await UserService.createUser('invalid', '').runPromiseEither(env)
+    invalidResult.fold(
+      error => console.error('Got expected validation error:', error),
+      user => console.log('Unexpectedly created user:', user)
+    )
+  }
+  
+  await runApplication()
+}
+
+effectDemo()
+#+end_src
+
+** Custom JavaScript Runtime Development
+
+Building language extensions and transpilers:
+
+#+begin_src typescript :tangle src/macro_system.ts
+/**
+ * Building a macro system for TypeScript
+ * This demonstrates advanced techniques for extending the language
+ */
+
+import * as ts from 'typescript'
+import * as fs from 'fs'
+import * as path from 'path'
+
+// Type definitions for our macro system
+namespace Macros {
+  export interface MacroFunction<T extends any[] = any[]> {
+    (...args: T): ts.Expression | ts.Statement | ts.Node
+  }
+  
+  export interface MacroRegistry {
+    [name: string]: MacroFunction
+  }
+  
+  export interface MacroContext {
+    factory: ts.NodeFactory
+    checker: ts.TypeChecker
+    sourceFile: ts.SourceFile
+    program: ts.Program
+  }
+}
+
+// Standard library of macros
+const standardMacros: Macros.MacroRegistry = {
+  // Assertion macro similar to Rust's assert!
+  assert(condition: ts.Expression, message?: ts.Expression) {
+    const factory = ts.factory
+    
+    const condition_str = ts.isStringLiteral(condition) 
+      ? condition.text 
+      : condition.getText()
+    
+    const errorMessage = message || factory.createStringLiteral(
+      `Assertion failed: ${condition_str}`
+    )
+    
+    return factory.createIfStatement(
+      factory.createPrefixUnaryExpression(
+        ts.SyntaxKind.ExclamationToken,
+        condition
+      ),
+      factory.createBlock([
+        factory.createThrowStatement(
+          factory.createNewExpression(
+            factory.createIdentifier('Error'),
+            undefined,
+            [errorMessage]
+          )
+        )
+      ]),
+      undefined
+    )
+  },
+  
+  // SQL template string macro
+  sql(template: ts.Expression, ...params: ts.Expression[]) {
+    const factory = ts.factory
+    
+    // We expect the template to be a string literal
+    if (!ts.isStringLiteral(template)) {
+      throw new Error('sql macro requires a string literal')
+    }
+    
+    // In a real implementation, we would validate the SQL
+    // and create proper parameterized query objects
+    
+    return factory.createObjectLiteralExpression([
+      factory.createPropertyAssignment(
+        'sql',
+        template
+      ),
+      factory.createPropertyAssignment(
+        'params',
+        factory.createArrayLiteralExpression(params)
+      ),
+      factory.createMethodDeclaration(
+        undefined,
+        undefined,
+        undefined,
+        'execute',
+        undefined,
+        undefined,
+        [],
+        undefined,
+        factory.createBlock([
+          factory.createReturnStatement(
+            factory.createCallExpression(
+              factory.createPropertyAccessExpression(
+                factory.createIdentifier('db'),
+                'query'
+              ),
+              undefined,
+              [
+                factory.createPropertyAccessExpression(
+                  factory.createThis(),
+                  'sql'
+                ),
+                factory.createPropertyAccessExpression(
+                  factory.createThis(),
+                  'params'
+                )
+              ]
+            )
+          )
+        ])
+      )
+    ])
+  },
+  
+  // Memoize function results
+  memoize(func: ts.Expression) {
+    const factory = ts.factory
+    
+    return factory.createCallExpression(
+      factory.createArrowFunction(
+        undefined,
+        undefined,
+        [],
+        undefined,
+        factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+        factory.createBlock([
+          factory.createVariableStatement(
+            undefined,
+            factory.createVariableDeclarationList(
+              [factory.createVariableDeclaration(
+                'cache',
+                undefined,
+                undefined,
+                factory.createNewExpression(
+                  factory.createIdentifier('Map'),
+                  undefined,
+                  []
+                )
+              )],
+              ts.NodeFlags.Const
+            )
+          ),
+          factory.createReturnStatement(
+            factory.createArrowFunction(
+              undefined,
+              undefined,
+              [factory.createParameterDeclaration(
+                undefined,
+                undefined,
+                undefined,
+                'args',
+                undefined,
+                undefined,
+                undefined
+              )],
+              undefined,
+              factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+              factory.createBlock([
+                factory.createVariableStatement(
+                  undefined,
+                  factory.createVariableDeclarationList(
+                    [factory.createVariableDeclaration(
+                      'key',
+                      undefined,
+                      undefined,
+                      factory.createCallExpression(
+                        factory.createPropertyAccessExpression(
+                          factory.createIdentifier('JSON'),
+                          'stringify'
+                        ),
+                        undefined,
+                        [factory.createIdentifier('args')]
+                      )
+                    )],
+                    ts.NodeFlags.Const
+                  )
+                ),
+                factory.createIfStatement(
+                  factory.createCallExpression(
+                    factory.createPropertyAccessExpression(
+                      factory.createIdentifier('cache'),
+                      'has'
+                    ),
+                    undefined,
+                    [factory.createIdentifier('key')]
+                  ),
+                  factory.createBlock([
+                    factory.createReturnStatement(
+                      factory.createCallExpression(
+                        factory.createPropertyAccessExpression(
+                          factory.createIdentifier('cache'),
+                          'get'
+                        ),
+                        undefined,
+                        [factory.createIdentifier('key')]
+                      )
+                    )
+                  ]),
+                  undefined
+                ),
+                factory.createVariableStatement(
+                  undefined,
+                  factory.createVariableDeclarationList(
+                    [factory.createVariableDeclaration(
+                      'result',
+                      undefined,
+                      undefined,
+                      factory.createCallExpression(
+                        func,
+                        undefined,
+                        [
+                          factory.createSpreadElement(
+                            factory.createIdentifier('args')
+                          )
+                        ]
+                      )
+                    )],
+                    ts.NodeFlags.Const
+                  )
+                ),
+                factory.createExpressionStatement(
+                  factory.createCallExpression(
+                    factory.createPropertyAccessExpression(
+                      factory.createIdentifier('cache'),
+                      'set'
+                    ),
+                    undefined,
+                    [
+                      factory.createIdentifier('key'),
+                      factory.createIdentifier('result')
+                    ]
+                  )
+                ),
+                factory.createReturnStatement(
+                  factory.createIdentifier('result')
+                )
+              ])
+            )
+          )
+        ])
+      ),
+      undefined,
+      []
+    )
+  },
+  
+  // Timing macro
+  time(expr: ts.Expression, label?: ts.Expression) {
+    const factory = ts.factory
+    
+    const labelExpr = label || factory.createStringLiteral('Execution time')
+    
+    return factory.createCallExpression(
+      factory.createArrowFunction(
+        undefined,
+        undefined,
+        [],
+        undefined,
+        factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+        factory.createBlock([
+          factory.createVariableStatement(
+            undefined,
+            factory.createVariableDeclarationList(
+              [factory.createVariableDeclaration(
+                'start',
+                undefined,
+                undefined,
+                factory.createCallExpression(
+                  factory.createPropertyAccessExpression(
+                    factory.createIdentifier('performance'),
+                    'now'
+                  ),
+                  undefined,
+                  []
+                )
+              )],
+              ts.NodeFlags.Const
+            )
+          ),
+          factory.createVariableStatement(
+            undefined,
+            factory.createVariableDeclarationList(
+              [factory.createVariableDeclaration(
+                'result',
+                undefined,
+                undefined,
+                expr
+              )],
+              ts.NodeFlags.Const
+            )
+          ),
+          factory.createExpressionStatement(
+            factory.createCallExpression(
+              factory.createPropertyAccessExpression(
+                factory.createIdentifier('console'),
+                'log'
+              ),
+              undefined,
+              [
+                labelExpr,
+                factory.createBinaryExpression(
+                  factory.createCallExpression(
+                    factory.createPropertyAccessExpression(
+                      factory.createIdentifier('performance'),
+                      'now'
+                    ),
+                    undefined,
+                    []
+                  ),
+                  factory.createToken(ts.SyntaxKind.MinusToken),
+                  factory.createIdentifier('start')
+                ),
+                factory.createStringLiteral('ms')
+              ]
+            )
+          ),
+          factory.createReturnStatement(
+            factory.createIdentifier('result')
+          )
+        ])
+      ),
+      undefined,
+      []
+    )
+  }
+}
+
+// Macro transformer for TypeScript compiler
+function createMacroTransformer(
+  program: ts.Program,
+  macros: Macros.MacroRegistry = standardMacros
+): ts.TransformerFactory<ts.SourceFile> {
+  return context => {
+    const checker = program.getTypeChecker()
+    
+    return sourceFile => {
+      const visitor = (node: ts.Node): ts.Node => {
+        // Look for calls to our special macro marker
+        if (ts.isCallExpression(node) && 
+            ts.isIdentifier(node.expression) && 
+            node.expression.text === 'macro') {
+          
+          // The first argument should be the name of the macro
+          if (node.arguments.length < 1 || !ts.isStringLiteral(node.arguments[0])) {
+            throw new Error('First argument to macro() must be a string literal')
+          }
+          
+          const macroName = node.arguments[0].text
+          const macroFunction = macros[macroName]
+          
+          if (!macroFunction) {
+            throw new Error(`Macro not found: ${macroName}`)
+          }
+          
+          // Pass the remaining arguments to the macro function
+          const macroArgs = node.arguments.slice(1)
+          const context: Macros.MacroContext = {
+            factory: ts.factory,
+            checker,
+            sourceFile,
+            program
+          }
+          
+          // Execute the macro function
+          return macroFunction.apply(context, macroArgs)
+        }
+        
+        // Recursively visit children
+        return ts.visitEachChild(node, visitor, context)
+      }
+      
+      return ts.visitNode(sourceFile, visitor) as ts.SourceFile
+    }
+  }
+}
+
+// Example of how to use the macro system
+function processMacros(filePath: string, outputPath: string) {
+  const program = ts.createProgram([filePath], {
+    target: ts.ScriptTarget.ES2020,
+    module: ts.ModuleKind.ESNext,
+  })
+  
+  const sourceFile = program.getSourceFile(filePath)
+  if (!sourceFile) {
+    throw new Error(`Could not find source file: ${filePath}`)
+  }
+  
+  // Apply the macro transformer
+  const result = ts.transform(
+    sourceFile,
+    [createMacroTransformer(program)]
+  )
+  
+  // Print the transformed source
+  const printer = ts.createPrinter()
+  const transformedCode = printer.printFile(result.transformed[0] as ts.SourceFile)
+  
+  // Write the result to file
+  fs.writeFileSync(outputPath, transformedCode)
+  
+  console.log(`Processed macros in ${filePath}`)
+  console.log(`Output written to ${outputPath}`)
+}
+
+// Example code with macros
+const exampleCode = `
+// TypeScript code with macros
+function fibonacci(n: number): number {
+  // Assertions using macros
+  macro("assert", n >= 0, "Fibonacci requires n >= 0")
+  
+  // Memoize computation
+  const memoizedFib = macro("memoize", function(x: number): number {
+    if (x <= 1) return x
+    return fibonacci(x - 1) + fibonacci(x - 2)
+  })
+  
+  // Time the execution
+  return macro("time", memoizedFib(n), "Fibonacci(" + n + ")")
+}
+
+// SQL query using macros
+function getUsersByRole(role: string) {
+  return macro("sql", "SELECT * FROM users WHERE role = ?", role)
+}
+
+// Call the functions
+fibonacci(10)
+getUsersByRole('admin')
+`
+
+// Save example code to file for processing
+const exampleFile = path.join(__dirname, 'example_with_macros.ts')
+fs.writeFileSync(exampleFile, exampleCode)
+
+// Process macros and show the result
+const outputFile = path.join(__dirname, 'example_processed.ts')
+processMacros(exampleFile, outputFile)
+
+// Read and log the processed file
+console.log('\nProcessed code:')
+console.log('===============')
+console.log(fs.readFileSync(outputFile, 'utf-8'))
+#+end_src

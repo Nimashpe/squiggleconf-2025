@@ -1,0 +1,715 @@
+#+TITLE: Advanced Go for Tool Builders
+#+AUTHOR: SquiggleConf 2025 Team
+#+DATE: <2025-06-18 Wed>
+#+STARTUP: overview
+#+PROPERTY: header-args:go :results output
+
+* Go for Staff+ Engineers & Tool Builders
+
+This tutorial focuses on advanced Go techniques relevant to building developer tools, high-performance systems, and language tooling.
+
+** Module System Internals
+
+Understanding Go's module system at a deeper level:
+
+#+begin_src go :tangle src/module_analyzer.go
+package main
+
+import (
+	"fmt"
+	"go/build"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Analyzes module dependencies and version resolution
+// Usage by senior engineers to debug complex dependency graphs
+func analyzeModuleGraph(modulePath string) {
+	ctx := build.Default
+	pkg, err := ctx.ImportDir(modulePath, build.ImportComment)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error importing package: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Package: %s\n", pkg.Name)
+	fmt.Printf("Imports: %v\n", pkg.Imports)
+	
+	// Additional analysis logic would go here
+	// - Version resolution strategies
+	// - Dependency graph optimization
+	// - Import cycle detection
+}
+
+func main() {
+	pwd, _ := os.Getwd()
+	analyzeModuleGraph(pwd)
+}
+#+end_src
+
+** Compiler Pipeline & AST Manipulation
+
+Working with Go's compiler internals for static analysis, code generation, and tooling:
+
+#+begin_src go :tangle src/ast_inspector.go
+package main
+
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+)
+
+// AST visitor for sophisticated code analysis
+type Inspector struct {
+	functionDepth int
+	complexityMap map[string]int
+}
+
+func (i *Inspector) Visit(n ast.Node) ast.Visitor {
+	if n == nil {
+		return nil
+	}
+
+	switch x := n.(type) {
+	case *ast.FuncDecl:
+		name := x.Name.Name
+		i.functionDepth++
+		i.complexityMap[name] = 1 // Base complexity
+		defer func() { i.functionDepth-- }()
+		
+	case *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt:
+		// Increment complexity for the current function
+		for name := range i.complexityMap {
+			i.complexityMap[name]++
+			break // Only update the most recent function
+		}
+	}
+	
+	return i
+}
+
+func main() {
+	fset := token.NewFileSet()
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: ast_inspector <file.go>")
+		return
+	}
+	
+	f, err := parser.ParseFile(fset, os.Args[1], nil, parser.ParseComments)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing file: %v\n", err)
+		return
+	}
+	
+	inspector := &Inspector{
+		complexityMap: make(map[string]int),
+	}
+	
+	ast.Walk(inspector, f)
+	
+	fmt.Println("Function Complexity Analysis:")
+	for fn, complexity := range inspector.complexityMap {
+		fmt.Printf("  %s: %d\n", fn, complexity)
+	}
+}
+#+end_src
+
+** Concurrency Patterns for High-Performance Tools
+
+Advanced patterns for building high-throughput, low-latency tooling:
+
+#+begin_src go :tangle src/pipeline_engine.go
+package main
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+)
+
+// Stage represents a processing stage in a pipeline
+type Stage func(ctx context.Context, in <-chan interface{}) <-chan interface{}
+
+// Pipeline composes multiple stages
+func Pipeline(ctx context.Context, stages ...Stage) Stage {
+	return func(ctx context.Context, in <-chan interface{}) <-chan interface{} {
+		for _, stage := range stages {
+			in = stage(ctx, in)
+		}
+		return in
+	}
+}
+
+// FanOut distributes work across multiple goroutines
+func FanOut(stage Stage, n int) Stage {
+	return func(ctx context.Context, in <-chan interface{}) <-chan interface{} {
+		channels := make([]<-chan interface{}, n)
+		for i := 0; i < n; i++ {
+			channels[i] = stage(ctx, in)
+		}
+		return MergeChannels(ctx, channels...)
+	}
+}
+
+// MergeChannels merges multiple channels into one
+func MergeChannels(ctx context.Context, channels ...<-chan interface{}) <-chan interface{} {
+	var wg sync.WaitGroup
+	out := make(chan interface{})
+	
+	// Start an output goroutine for each input channel
+	output := func(c <-chan interface{}) {
+		defer wg.Done()
+		for n := range c {
+			select {
+			case out <- n:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+	
+	wg.Add(len(channels))
+	for _, c := range channels {
+		go output(c)
+	}
+	
+	// Start a goroutine to close out once all the output goroutines are done
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+	
+	return out
+}
+
+// Example usage for processing large volumes of source code
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	// Example pipeline for processing source files
+	tokenize := func(ctx context.Context, in <-chan interface{}) <-chan interface{} {
+		out := make(chan interface{})
+		go func() {
+			defer close(out)
+			for file := range in {
+				// Tokenize file content
+				out <- fmt.Sprintf("Tokenized: %v", file)
+			}
+		}()
+		return out
+	}
+	
+	parse := func(ctx context.Context, in <-chan interface{}) <-chan interface{} {
+		out := make(chan interface{})
+		go func() {
+			defer close(out)
+			for tokens := range in {
+				// Parse tokens into AST
+				out <- fmt.Sprintf("Parsed: %v", tokens)
+			}
+		}()
+		return out
+	}
+	
+	analyze := func(ctx context.Context, in <-chan interface{}) <-chan interface{} {
+		out := make(chan interface{})
+		go func() {
+			defer close(out)
+			for ast := range in {
+				// Analyze AST
+				out <- fmt.Sprintf("Analyzed: %v", ast)
+			}
+		}()
+		return out
+	}
+	
+	// Create pipeline with fan-out for CPU-intensive parsing stage
+	pipeline := Pipeline(ctx,
+		tokenize,
+		FanOut(parse, 4), // Use 4 goroutines for parsing
+		analyze,
+	)
+	
+	// Feed input and collect results
+	input := make(chan interface{})
+	go func() {
+		defer close(input)
+		// Simulate feeding source files
+		for i := 1; i <= 10; i++ {
+			input <- fmt.Sprintf("file%d.go", i)
+		}
+	}()
+	
+	// Process results
+	for result := range pipeline(ctx, input) {
+		fmt.Println(result)
+	}
+}
+#+end_src
+
+** Language Server Protocol Implementation
+
+Building a language server from scratch for developer tooling:
+
+#+begin_src go :tangle src/minimal_lsp.go
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"strings"
+)
+
+// LSP message structures
+type Message struct {
+	JsonRPC string      `json:"jsonrpc"`
+	ID      interface{} `json:"id,omitempty"`
+	Method  string      `json:"method,omitempty"`
+	Params  interface{} `json:"params,omitempty"`
+	Result  interface{} `json:"result,omitempty"`
+	Error   *Error      `json:"error,omitempty"`
+}
+
+type Error struct {
+	Code    int         `json:"code"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
+}
+
+// Minimal language server implementation
+func main() {
+	log.SetOutput(os.Stderr)
+	
+	// Set up channels for communication
+	inChan := make(chan Message)
+	outChan := make(chan Message)
+	
+	// Start reader
+	go readMessages(os.Stdin, inChan)
+	
+	// Start writer
+	go writeMessages(os.Stdout, outChan)
+	
+	// Main loop - process messages
+	for msg := range inChan {
+		switch msg.Method {
+		case "initialize":
+			// Respond with capabilities
+			outChan <- Message{
+				JsonRPC: "2.0",
+				ID:      msg.ID,
+				Result: map[string]interface{}{
+					"capabilities": map[string]interface{}{
+						"textDocumentSync": 1, // Full sync
+						"completionProvider": map[string]interface{}{
+							"triggerCharacters": []string{".", ":"},
+						},
+						"hoverProvider": true,
+					},
+				},
+			}
+			
+		case "textDocument/completion":
+			// Provide completions
+			outChan <- Message{
+				JsonRPC: "2.0",
+				ID:      msg.ID,
+				Result: map[string]interface{}{
+					"items": []map[string]interface{}{
+						{
+							"label": "fmt",
+							"kind":  9, // Module
+							"detail": "Standard library package",
+						},
+						{
+							"label": "Println",
+							"kind":  3, // Function
+							"detail": "func Println(a ...interface{}) (n int, err error)",
+						},
+					},
+				},
+			}
+			
+		case "shutdown":
+			outChan <- Message{
+				JsonRPC: "2.0",
+				ID:      msg.ID,
+				Result:  nil,
+			}
+			
+		case "exit":
+			close(outChan)
+			return
+			
+		default:
+			// Unhandled method
+			log.Printf("Unhandled method: %s", msg.Method)
+			if msg.ID != nil {
+				outChan <- Message{
+					JsonRPC: "2.0",
+					ID:      msg.ID,
+					Error: &Error{
+						Code:    -32601,
+						Message: "Method not found",
+					},
+				}
+			}
+		}
+	}
+}
+
+// Read LSP messages from reader
+func readMessages(r io.Reader, ch chan<- Message) {
+	defer close(ch)
+	
+	buf := make([]byte, 1024)
+	
+	for {
+		// Read header
+		header := ""
+		for !strings.Contains(header, "\r\n\r\n") {
+			n, err := r.Read(buf)
+			if err != nil {
+				if err != io.EOF {
+					log.Printf("Error reading: %v", err)
+				}
+				return
+			}
+			header += string(buf[:n])
+		}
+		
+		// Parse Content-Length
+		parts := strings.Split(header, "\r\n")
+		contentLength := 0
+		for _, part := range parts {
+			if strings.HasPrefix(part, "Content-Length: ") {
+				fmt.Sscanf(part, "Content-Length: %d", &contentLength)
+				break
+			}
+		}
+		
+		if contentLength == 0 {
+			log.Printf("Invalid header: %s", header)
+			continue
+		}
+		
+		// Read content
+		content := make([]byte, contentLength)
+		_, err := io.ReadFull(r, content)
+		if err != nil {
+			log.Printf("Error reading content: %v", err)
+			return
+		}
+		
+		// Parse message
+		var msg Message
+		if err := json.Unmarshal(content, &msg); err != nil {
+			log.Printf("Error parsing message: %v", err)
+			continue
+		}
+		
+		ch <- msg
+	}
+}
+
+// Write LSP messages to writer
+func writeMessages(w io.Writer, ch <-chan Message) {
+	for msg := range ch {
+		content, err := json.Marshal(msg)
+		if err != nil {
+			log.Printf("Error marshaling message: %v", err)
+			continue
+		}
+		
+		header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(content))
+		
+		if _, err := w.Write([]byte(header)); err != nil {
+			log.Printf("Error writing header: %v", err)
+			return
+		}
+		
+		if _, err := w.Write(content); err != nil {
+			log.Printf("Error writing content: %v", err)
+			return
+		}
+	}
+}
+#+end_src
+
+** Memory Management Optimization
+
+Advanced techniques for optimizing Go's memory usage:
+
+#+begin_src go :tangle src/memory_profiler.go
+package main
+
+import (
+	"fmt"
+	"os"
+	"runtime"
+	"runtime/pprof"
+	"time"
+)
+
+// Pool of fixed-size byte buffers to minimize GC pressure
+type BufferPool struct {
+	pool chan []byte
+	size int
+}
+
+func NewBufferPool(size, count int) *BufferPool {
+	return &BufferPool{
+		pool: make(chan []byte, count),
+		size: size,
+	}
+}
+
+func (p *BufferPool) Get() []byte {
+	select {
+	case buf := <-p.pool:
+		return buf
+	default:
+		return make([]byte, p.size)
+	}
+}
+
+func (p *BufferPool) Put(buf []byte) {
+	if len(buf) != p.size {
+		return // Wrong size, let it be garbage collected
+	}
+	
+	select {
+	case p.pool <- buf:
+		// Buffer returned to pool
+	default:
+		// Pool is full, let it be garbage collected
+	}
+}
+
+func main() {
+	// Create heap profile
+	f, err := os.Create("heap.prof")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating heap profile: %v\n", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+	
+	// Create a buffer pool for 1KB buffers
+	pool := NewBufferPool(1024, 100)
+	
+	// Example workload - process mock data
+	processWorkload(pool)
+	
+	// Take a heap snapshot
+	runtime.GC() // Force GC to get accurate memory stats
+	if err := pprof.WriteHeapProfile(f); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing heap profile: %v\n", err)
+		os.Exit(1)
+	}
+	
+	// Print memory stats
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	fmt.Printf("Alloc: %v MiB\n", m.Alloc/1024/1024)
+	fmt.Printf("TotalAlloc: %v MiB\n", m.TotalAlloc/1024/1024)
+	fmt.Printf("Sys: %v MiB\n", m.Sys/1024/1024)
+	fmt.Printf("NumGC: %v\n", m.NumGC)
+}
+
+func processWorkload(pool *BufferPool) {
+	// Simulate processing 10,000 requests
+	for i := 0; i < 10000; i++ {
+		buf := pool.Get()
+		
+		// Simulate work
+		for j := 0; j < len(buf); j++ {
+			buf[j] = byte(j % 256)
+		}
+		
+		// Return buffer to pool
+		pool.Put(buf)
+		
+		// Every 1000 requests, force a GC to simulate pressure
+		if i%1000 == 0 {
+			runtime.GC()
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+#+end_src
+
+** Building a Compiler Plugin System
+
+Creating extensible tool architectures:
+
+#+begin_src go :tangle src/plugin_system.go
+package main
+
+import (
+	"fmt"
+	"plugin"
+	"reflect"
+)
+
+// Plugin interface that all plugins must implement
+type CodeAnalyzer interface {
+	Name() string
+	Analyze(code string) ([]Issue, error)
+}
+
+// Issue represents a code issue found by an analyzer
+type Issue struct {
+	Line    int
+	Column  int
+	Message string
+	Severity string
+}
+
+// PluginManager handles loading and managing plugins
+type PluginManager struct {
+	plugins map[string]CodeAnalyzer
+}
+
+func NewPluginManager() *PluginManager {
+	return &PluginManager{
+		plugins: make(map[string]CodeAnalyzer),
+	}
+}
+
+// LoadPlugin loads a plugin from a .so file
+func (pm *PluginManager) LoadPlugin(path string) error {
+	p, err := plugin.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open plugin: %w", err)
+	}
+	
+	// Look up the symbol "Analyzer" which should implement CodeAnalyzer
+	analyzerSymbol, err := p.Lookup("Analyzer")
+	if err != nil {
+		return fmt.Errorf("failed to find Analyzer symbol: %w", err)
+	}
+	
+	// Check if the symbol is the correct type
+	analyzer, ok := analyzerSymbol.(CodeAnalyzer)
+	if !ok {
+		// Try if it's a pointer to CodeAnalyzer
+		ptr := reflect.ValueOf(analyzerSymbol)
+		if ptr.Kind() == reflect.Ptr && ptr.Elem().Type().Implements(reflect.TypeOf((*CodeAnalyzer)(nil)).Elem()) {
+			analyzer = ptr.Elem().Interface().(CodeAnalyzer)
+		} else {
+			return fmt.Errorf("symbol is not a CodeAnalyzer")
+		}
+	}
+	
+	pm.plugins[analyzer.Name()] = analyzer
+	return nil
+}
+
+// RunAnalysis runs all loaded plugins on the given code
+func (pm *PluginManager) RunAnalysis(code string) map[string][]Issue {
+	results := make(map[string][]Issue)
+	
+	for name, analyzer := range pm.plugins {
+		issues, err := analyzer.Analyze(code)
+		if err != nil {
+			fmt.Printf("Error running analyzer %s: %v\n", name, err)
+			continue
+		}
+		results[name] = issues
+	}
+	
+	return results
+}
+
+func main() {
+	// Example usage
+	pm := NewPluginManager()
+	
+	// In a real application, these would be loaded from plugin files
+	// err := pm.LoadPlugin("path/to/linter_plugin.so")
+	// if err != nil {
+	//     fmt.Printf("Error loading plugin: %v\n", err)
+	//     return
+	// }
+	
+	// For demo purposes, simulate some loaded plugins
+	simulatePlugins(pm)
+	
+	// Run analysis on some code
+	code := `package main
+
+import "fmt"
+
+func main() {
+	var x int
+	fmt.Println("Hello, world!")
+}
+`
+	results := pm.RunAnalysis(code)
+	
+	// Print results
+	for name, issues := range results {
+		fmt.Printf("Results from %s:\n", name)
+		if len(issues) == 0 {
+			fmt.Println("  No issues found")
+		} else {
+			for _, issue := range issues {
+				fmt.Printf("  Line %d, Col %d: [%s] %s\n", 
+					issue.Line, issue.Column, issue.Severity, issue.Message)
+			}
+		}
+	}
+}
+
+// Simulate some loaded plugins for demo purposes
+func simulatePlugins(pm *PluginManager) {
+	// Unused variable detector
+	pm.plugins["unused-var"] = &simulatedAnalyzer{
+		name: "unused-var",
+		analyzeFunc: func(code string) ([]Issue, error) {
+			// In a real plugin, this would parse the code and perform analysis
+			return []Issue{
+				{
+					Line:     5,
+					Column:   6,
+					Message:  "Variable 'x' declared but not used",
+					Severity: "warning",
+				},
+			}, nil
+		},
+	}
+	
+	// Import checker
+	pm.plugins["import-checker"] = &simulatedAnalyzer{
+		name: "import-checker",
+		analyzeFunc: func(code string) ([]Issue, error) {
+			// This would check for unused or redundant imports
+			return []Issue{}, nil
+		},
+	}
+}
+
+// Simulated analyzer for demo purposes
+type simulatedAnalyzer struct {
+	name        string
+	analyzeFunc func(string) ([]Issue, error)
+}
+
+func (a *simulatedAnalyzer) Name() string {
+	return a.name
+}
+
+func (a *simulatedAnalyzer) Analyze(code string) ([]Issue, error) {
+	return a.analyzeFunc(code)
+}
+#+end_src
