@@ -1,57 +1,27 @@
-.PHONY: all lint-basic lint tangle export clean help
+# SquiggleConf 2025 Notes Makefile
 
-# Default target
-all: lint-basic tangle
+.PHONY: all validate-org lint-basic tangle export-html export-pdf export-md export clean help
+
+# Default target: validate and tangle org files
+all: validate-org tangle  ## Run validation and tangle (default)
+
+# Validate org files (simple check for validity)
+validate-org:  ## Simple check that Org files can be loaded
+	@echo "Validating Org files..."
+	@emacs --batch --load tools/emacs/validate-org.el
 
 # Basic lint without checking languages
-lint-basic:
+lint-basic:  ## Check Org files for issues (ignoring language warnings)
 	@echo "Basic linting of Org files (ignoring language warnings)..."
-	@emacs --batch \
-		--eval "(require 'org)" \
-		--eval "(setq org-lint-warning-face 'font-lock-warning-face)" \
-		--eval "(defun my-org-lint-filter (issues) (cl-remove-if (lambda (i) (eq (nth 2 i) 'suspicious-language-in-src-block)) issues))" \
-		--eval "(advice-add 'org-lint--collect-issues :filter-return #'my-org-lint-filter)" \
-		--eval "(dolist (file (directory-files-recursively \".\" \"\\.org$$\")) \
-			(with-current-buffer (find-file file) \
-				(message \"Linting %s...\" file) \
-				(let ((issues (org-lint))) \
-					(if issues \
-						(progn \
-							(message \"Issues found in %s:\" file) \
-							(dolist (issue issues) \
-								(message \"  %s\" issue)) \
-							(kill-emacs 1)) \
-						(message \"No issues found in %s\" file)))))"
+	@emacs --batch --load tools/emacs/lint-org.el
 
-# Full lint (with language checks)
-lint:
-	@echo "Linting Org files (with language checks)..."
-	@emacs --batch \
-		--eval "(require 'org)" \
-		--eval "(dolist (file (directory-files-recursively \".\" \"\\.org$$\")) \
-			(with-current-buffer (find-file file) \
-				(message \"Linting %s...\" file) \
-				(let ((issues (org-lint))) \
-					(if issues \
-						(progn \
-							(message \"Issues found in %s:\" file) \
-							(dolist (issue issues) \
-								(message \"  %s\" issue)) \
-							(kill-emacs 1)) \
-						(message \"No issues found in %s\" file)))))"
-
-# Tangle org files
-tangle:
+# Tangle org files to extract code
+tangle:  ## Extract code blocks from Org files
 	@echo "Tangling Org files..."
-	@emacs --batch \
-		--eval "(require 'org)" \
-		--eval "(dolist (file (directory-files-recursively \".\" \"\\.org$$\")) \
-			(with-current-buffer (find-file file) \
-				(message \"Tangling %s...\" file) \
-				(org-babel-tangle)))"
+	@emacs --batch --load tools/emacs/tangle-org.el
 
 # Export org files to HTML
-export-html:
+export-html:  ## Export Org files to HTML
 	@echo "Exporting Org files to HTML..."
 	@mkdir -p exports/html
 	@emacs --batch \
@@ -63,7 +33,7 @@ export-html:
 	@find . -name "*.html" -exec mv {} exports/html/ \;
 
 # Export org files to PDF
-export-pdf:
+export-pdf:  ## Export Org files to PDF
 	@echo "Exporting Org files to PDF..."
 	@mkdir -p exports/pdf
 	@emacs --batch \
@@ -75,7 +45,7 @@ export-pdf:
 	@find . -name "*.pdf" -exec mv {} exports/pdf/ \;
 
 # Export org files to Markdown
-export-md:
+export-md:  ## Export Org files to Markdown
 	@echo "Exporting Org files to Markdown..."
 	@mkdir -p exports/markdown
 	@emacs --batch \
@@ -87,29 +57,21 @@ export-md:
 	@find . -name "*.md" -exec mv {} exports/markdown/ \;
 
 # Export all formats
-export: export-html export-pdf export-md
+export: export-html export-pdf export-md  ## Export Org files to all formats
 
 # Clean generated files
-clean:
+clean:  ## Remove generated files
 	@echo "Cleaning generated files..."
 	@rm -rf exports
 	@find . -name "*.html" -delete
 	@find . -name "*.pdf" -delete
-	@find . -name "*.md" -delete
 	@find . -name "*.tex" -delete
 
-# Help message
-help:
+# Dynamic help message that reads target comments
+help:  ## Show this help message
 	@echo "SquiggleConf 2025 Notes Makefile"
 	@echo ""
-	@echo "Available targets:"
-	@echo "  all        - Run basic lint and tangle (default)"
-	@echo "  lint-basic - Check Org files for issues (ignoring language warnings)"
-	@echo "  lint       - Full lint including language checks"
-	@echo "  tangle     - Extract code blocks from Org files"
-	@echo "  export-html - Export Org files to HTML"
-	@echo "  export-pdf  - Export Org files to PDF"
-	@echo "  export-md   - Export Org files to Markdown"
-	@echo "  export     - Export Org files to all formats"
-	@echo "  clean      - Remove generated files"
-	@echo "  help       - Show this help message"
+	@echo "Usage: gmake [target]"
+	@echo ""
+	@echo "Targets:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
