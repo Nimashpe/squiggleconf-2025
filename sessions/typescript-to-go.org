@@ -1,0 +1,268 @@
+#+TITLE: How and Why We Ported TypeScript to Go
+#+DATE: <2025-09-19 Fri 09:00>
+#+PROPERTY: header-args:python :session *ts-to-go* :results output
+#+PROPERTY: header-args:go :results output
+#+PROPERTY: header-args:mermaid :file ../diagrams/ts-to-go-%%N.png
+
+* Session Information
+- *Speaker*: Jake Bailey (TypeScript team)
+- *Time*: Day 2, 9:00 AM
+- *Topics*: Performance, Language Implementation, Compiler Architecture
+
+* Pre-Session Research
+- [[https://github.com/microsoft/TypeScript][TypeScript GitHub]]
+- Previous work on TypeScript performance
+
+* Architecture Overview
+
+** TypeScript Compiler Pipeline
+
+#+begin_src mermaid :file ../diagrams/ts-compiler-pipeline.png
+graph LR
+    Source[TS Source] --> Scanner
+    Scanner --> Parser
+    Parser --> AST[AST]
+    AST --> Binder
+    Binder --> Checker[Type Checker]
+    Checker --> Transform[Transformer]
+    Transform --> Emit[Emitter]
+    Emit --> JS[JavaScript]
+    
+    style Checker fill:#f9f,stroke:#333,stroke-width:4px
+#+end_src
+
+** Performance Comparison
+
+#+begin_src python :tangle ../tools/scripts/perf-comparison.py
+#!/usr/bin/env python3
+"""Compare TypeScript vs Go implementation performance metrics."""
+
+import matplotlib.pyplot as plt
+import numpy as np
+from dataclasses import dataclass
+from typing import List
+
+@dataclass
+class PerfMetric:
+    operation: str
+    ts_time_ms: float
+    go_time_ms: float
+    
+    @property
+    def speedup(self) -> float:
+        return self.ts_time_ms / self.go_time_ms
+
+# Session data will be collected here
+metrics = [
+    PerfMetric("Parse 1000 files", 0, 0),
+    PerfMetric("Type check large project", 0, 0),
+    PerfMetric("Incremental compilation", 0, 0),
+    PerfMetric("Memory usage (MB)", 0, 0),
+]
+
+def plot_performance_comparison(metrics: List[PerfMetric]):
+    """Create performance comparison visualization."""
+    operations = [m.operation for m in metrics]
+    ts_times = [m.ts_time_ms for m in metrics]
+    go_times = [m.go_time_ms for m in metrics]
+    
+    x = np.arange(len(operations))
+    width = 0.35
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ts_bars = ax.bar(x - width/2, ts_times, width, label='TypeScript')
+    go_bars = ax.bar(x + width/2, go_times, width, label='Go Port')
+    
+    ax.set_ylabel('Time (ms)')
+    ax.set_title('TypeScript vs Go Implementation Performance')
+    ax.set_xticks(x)
+    ax.set_xticklabels(operations, rotation=45, ha='right')
+    ax.legend()
+    
+    # Add speedup annotations
+    for i, metric in enumerate(metrics):
+        if metric.go_time_ms > 0:
+            speedup = metric.speedup
+            ax.text(i, max(ts_times[i], go_times[i]) * 1.05, 
+                   f'{speedup:.1f}x', ha='center')
+    
+    plt.tight_layout()
+    plt.savefig('../diagrams/ts-go-performance.png')
+    
+if __name__ == "__main__":
+    # This will be filled during the session
+    plot_performance_comparison(metrics)
+#+end_src
+
+* Key Insights
+
+** Why Go?
+- Performance characteristics
+- Strong typing system
+- Simpler concurrency model
+- Easier distribution (single binary)
+
+** Implementation Challenges
+- [ ] Memory management differences
+- [ ] Type system differences
+- [ ] Module resolution
+- [ ] Testing approach
+
+** Demo: Go Implementation Code
+
+#+begin_src go :tangle ../tools/demo-projects/ts-in-go/scanner.go
+package typescript
+
+import (
+	"fmt"
+	"strings"
+	"unicode"
+)
+
+// TokenType represents the type of token
+type TokenType int
+
+const (
+	EndOfFile TokenType = iota
+	Identifier
+	Keyword
+	StringLiteral
+	NumericLiteral
+	Operator
+	Punctuation
+	Comment
+	WhiteSpace
+)
+
+// Token represents a lexical token in TypeScript
+type Token struct {
+	Type  TokenType
+	Value string
+	Pos   int
+	Line  int
+	Col   int
+}
+
+// Scanner is a lexical scanner for TypeScript
+type Scanner struct {
+	source     string
+	pos        int
+	lineStart  int
+	line       int
+	startPos   int
+	startLine  int
+	startCol   int
+	currentPos int
+}
+
+// NewScanner creates a new scanner for the given source
+func NewScanner(source string) *Scanner {
+	return &Scanner{
+		source:    source,
+		pos:       0,
+		line:      1,
+		lineStart: 0,
+	}
+}
+
+// Scan scans the next token
+func (s *Scanner) Scan() *Token {
+	s.skipWhitespace()
+	
+	if s.pos >= len(s.source) {
+		return &Token{Type: EndOfFile, Pos: s.pos, Line: s.line, Col: s.pos - s.lineStart}
+	}
+	
+	s.startPos = s.pos
+	s.startLine = s.line
+	s.startCol = s.pos - s.lineStart
+	
+	ch := s.source[s.pos]
+	s.pos++
+	
+	// Handle various token types
+	if isLetter(ch) || ch == '_' || ch == '$' {
+		return s.scanIdentifier()
+	}
+	
+	if isDigit(ch) {
+		s.pos--
+		return s.scanNumber()
+	}
+	
+	if ch == '"' || ch == '\'' || ch == '`' {
+		s.pos--
+		return s.scanString()
+	}
+	
+	// Operators and other characters
+	if ch == '/' {
+		if s.pos < len(s.source) {
+			if s.source[s.pos] == '/' {
+				return s.scanLineComment()
+			}
+			if s.source[s.pos] == '*' {
+				return s.scanBlockComment()
+			}
+		}
+	}
+	
+	// Default: single character token
+	return &Token{
+		Type:  Punctuation,
+		Value: string(ch),
+		Pos:   s.startPos,
+		Line:  s.startLine,
+		Col:   s.startCol,
+	}
+}
+
+// Helper method implementations would be here
+func (s *Scanner) skipWhitespace() {
+	// Implementation details
+}
+
+func (s *Scanner) scanIdentifier() *Token {
+	// Implementation details
+	return &Token{Type: Identifier, Value: "placeholder", Pos: s.startPos, Line: s.startLine, Col: s.startCol}
+}
+
+func (s *Scanner) scanNumber() *Token {
+	// Implementation details
+	return &Token{Type: NumericLiteral, Value: "0", Pos: s.startPos, Line: s.startLine, Col: s.startCol}
+}
+
+func (s *Scanner) scanString() *Token {
+	// Implementation details
+	return &Token{Type: StringLiteral, Value: "\"\"", Pos: s.startPos, Line: s.startLine, Col: s.startCol}
+}
+
+func (s *Scanner) scanLineComment() *Token {
+	// Implementation details
+	return &Token{Type: Comment, Value: "//", Pos: s.startPos, Line: s.startLine, Col: s.startCol}
+}
+
+func (s *Scanner) scanBlockComment() *Token {
+	// Implementation details
+	return &Token{Type: Comment, Value: "/**/", Pos: s.startPos, Line: s.startLine, Col: s.startCol}
+}
+
+func isLetter(ch byte) bool {
+	return ('a' <= ch && ch <= 'z') || ('A' <= ch && ch <= 'Z')
+}
+
+func isDigit(ch byte) bool {
+	return '0' <= ch && ch <= '9'
+}
+#+end_src
+
+* Questions to Ask
+- What were the most challenging aspects of the port?
+- How is the Go version maintained alongside the TypeScript original?
+- What performance trade-offs were made?
+- How do you handle JavaScript's dynamic nature in Go's static type system?
+
+* TODO Items [0/3]
+- [ ] Complete performance metrics table during the session
+- [ ] Test Go example code with TypeScript sample
+- [ ] Investigate TypeScript-to-Go type conversion strategies

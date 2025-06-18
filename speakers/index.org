@@ -1,0 +1,96 @@
+#+TITLE: SquiggleConf 2025 Speakers
+#+STARTUP: overview
+
+* Speaker Directory
+
+This directory contains profiles and notes for all SquiggleConf 2025 speakers.
+
+** Keynote Speakers
+
+*** Anthony Fu
+- *Session*: [[file:../sessions/make-tools-people-love.org][Make Tools That People Love]]
+- *Background*: Open sourceror and design engineer
+- *Known For*: VueUse, Slidev, UnoCSS, various Vite plugins
+- *Links*: [[https://github.com/antfu][GitHub]], [[https://twitter.com/antfu7][Twitter]]
+- *Notes*: [[file:speaker-notes/anthony-fu.org][Speaker Notes]]
+
+*** Jake Bailey
+- *Session*: [[file:../sessions/typescript-to-go.org][How and Why We Ported TypeScript to Go]]
+- *Background*: TypeScript team at Microsoft
+- *Known For*: Work on TypeScript compiler performance
+- *Links*: [[https://github.com/jakebailey][GitHub]], [[https://twitter.com/jbailey0][Twitter]]
+- *Notes*: [[file:speaker-notes/jake-bailey.org][Speaker Notes]]
+
+*** Michelle Bakels
+- *Session*: [[file:../sessions/tech-broke-my-heart.org][Tech Broke My Heart]]
+- *Background*: Software developer, program director of developer health at G2i
+- *Known For*: Mental health advocacy in tech
+- *Links*: [[https://twitter.com/MichelleBakels][Twitter]]
+- *Notes*: [[file:speaker-notes/michelle-bakels.org][Speaker Notes]]
+
+** Core Track Speakers
+
+*** Shelley Vohr
+- *Session*: [[file:../sessions/electron-internal-tooling.org][Electron's Internal Tooling: Open Source at Scale]]
+- *Background*: Core engineer @electron; collaborator @nodejs
+- *Known For*: Electron, Node.js contributions
+- *Links*: [[https://github.com/codebytere][GitHub]], [[https://twitter.com/codebytere][Twitter]]
+- *Notes*: [[file:speaker-notes/shelley-vohr.org][Speaker Notes]]
+
+*** Nicolò Ribaudo
+- *Session*: [[file:../sessions/source-maps-magic.org][Source Maps: How Does the Magic Work?]]
+- *Background*: Babel maintainer and TC39 representative at Igalia
+- *Known For*: Babel, JavaScript standards
+- *Links*: [[https://github.com/nicolo-ribaudo][GitHub]], [[https://twitter.com/NicoloRibaudo][Twitter]]
+- *Notes*: [[file:speaker-notes/nicolo-ribaudo.org][Speaker Notes]]
+
+*** David Sherret
+- *Session*: [[file:../sessions/jsr-package-registry.org][JSR: Designing Package Registry Module Resolution]]
+- *Background*: Deno developer; creator of ts-morph, dprint, ts-ast-viewer
+- *Known For*: TypeScript tooling
+- *Links*: [[https://github.com/dsherret][GitHub]], [[https://twitter.com/david_sherret][Twitter]]
+- *Notes*: [[file:speaker-notes/david-sherret.org][Speaker Notes]]
+
+*** TJ DeVries
+- *Session*: [[file:../sessions/zero-to-squiggle-lsp.org][Zero to Squiggle with the Language Server Protocol]]
+- *Background*: Neovim core team
+- *Known For*: Neovim, Telescope.nvim
+- *Links*: [[https://github.com/tjdevries][GitHub]], [[https://twitter.com/teej_dv][Twitter]]
+- *Notes*: [[file:speaker-notes/tj-devries.org][Speaker Notes]]
+
+** Additional Speakers
+
+*** Oliver Dunk
+- *Session*: [[file:../sessions/cross-browser-devtools.org][Cross-Browser DevTools with WebExtensions]]
+- *Background*: Chrome Extensions @ Google, Editor @ W3C WebExtensions CG
+- *Known For*: Browser extension standards
+- *Links*: [[https://github.com/oliverdunk][GitHub]], [[https://twitter.com/oliverdunk_][Twitter]]
+- *Notes*: [[file:speaker-notes/oliver-dunk.org][Speaker Notes]]
+
+*** Pete Gonzalez
+- *Session*: [[file:../sessions/lockfiles-phd.org][The Lockfiles PhD You Never Got]]
+- *Background*: Co-creator of Lockfile Explorer, engineer at TikTok
+- *Known For*: Package management expertise
+- *Links*: [[https://github.com/octogonz][GitHub]]
+- *Notes*: [[file:speaker-notes/pete-gonzalez.org][Speaker Notes]]
+
+*** Amy Dutton
+- *Session*: [[file:../sessions/javascript-framework-cage-match.org][JavaScript Framework Cage Match]]
+- *Background*: RedwoodJS lead maintainer
+- *Known For*: Web framework contributions
+- *Links*: [[https://github.com/amdutton][GitHub]], [[https://twitter.com/selfteachme][Twitter]]
+- *Notes*: [[file:speaker-notes/amy-dutton.org][Speaker Notes]]
+
+*** Mattia Manzati
+- *Session*: [[file:../sessions/effect-type-safe-errors.org][Effect: Type-Safe Errors and Dependency Injection]]
+- *Background*: Founding engineer, Effectful Technologies
+- *Known For*: Effect library, functional TypeScript
+- *Links*: [[https://github.com/mattiamanzati][GitHub]], [[https://twitter.com/mattiamanzati][Twitter]]
+- *Notes*: [[file:speaker-notes/mattia-manzati.org][Speaker Notes]]
+
+*** Alexander Lichter
+- *Session*: [[file:../sessions/rolldown-vite-rust.org][Rolldown: How Vite Bundles at the Speed of Rust]]
+- *Background*: Developer on Nuxt and void(0) devrel engineer
+- *Known For*: Vite, Nuxt.js
+- *Links*: [[https://github.com/manniL][GitHub]], [[https://twitter.com/TheAlexLichter][Twitter]]
+- *Notes*: [[file:speaker-notes/alexander-lichter.org][Speaker Notes]]

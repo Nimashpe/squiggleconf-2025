@@ -1,0 +1,39 @@
+#+TITLE: SquiggleConf 2025 Sessions
+#+STARTUP: overview
+
+* Session Index
+
+This directory contains notes for all SquiggleConf 2025 sessions. Sessions are organized by topic category.
+
+** Build Tools & Bundlers
+- [[file:rolldown-vite-rust.org][Rolldown: How Vite Bundles at the Speed of Rust]]
+- [[file:lockfiles-phd.org][The Lockfiles PhD You Never Got]]
+
+** Language Servers & IDE Tooling
+- [[file:zero-to-squiggle-lsp.org][Zero to Squiggle with the Language Server Protocol]]
+- [[file:source-maps-magic.org][Source Maps: How Does the Magic Work?]]
+
+** TypeScript & Type Systems
+- [[file:typescript-to-go.org][How and Why We Ported TypeScript to Go]]
+- [[file:effect-type-safe-errors.org][Effect: Type-Safe Errors and Dependency Injection]]
+
+** Developer Experience
+- [[file:make-tools-people-love.org][Make Tools That People Love]]
+- [[file:tech-broke-my-heart.org][Tech Broke My Heart]]
+- [[file:electron-internal-tooling.org][Electron's Internal Tooling: Open Source at Scale]]
+
+** Framework & Library Ecosystems
+- [[file:javascript-framework-cage-match.org][JavaScript Framework Cage Match]]
+- [[file:jsr-package-registry.org][JSR: Designing Package Registry Module Resolution]]
+
+** WebAssembly & Cross-Platform
+- [[file:aot-typescript-wasm.org][Ahead-of-Time TypeScript Compilation with WebAssembly]]
+- [[file:wasi-building-blocks.org][WASI: Building Blocks for the Future]]
+
+** Accessibility & Quality
+- [[file:accessibility-storybook.org][Accessibility Testing with Storybook]]
+- [[file:quality-code-samples.org][Building Quality Code Samples for Documentation]]
+
+** Tooling Documentation
+- [[file:why-we-made-tsdoc.org][Why We Made TSDoc: Documentation for TypeScript]]
+- [[file:cross-browser-devtools.org][Cross-Browser DevTools with WebExtensions]]

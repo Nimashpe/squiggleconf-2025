@@ -1,0 +1,77 @@
+#+TITLE: Boston TypeScript Club
+#+DATE: <2025-09-18 Thu 18:30>
+#+PROPERTY: header-args :mkdirp yes
+
+* Boston TypeScript Club Meetup at SquiggleConf
+
+** Event Details
+- *Date*: Thursday, September 18, 2025 (Day 1 Evening)
+- *Time*: 6:30 PM - 8:30 PM
+- *Location*: The Reef Bar & Lounge, New England Aquarium
+- *Registration*: Required via SquiggleConf app
+
+** About Boston TS Club
+
+The Boston TypeScript Club is a community of TypeScript enthusiasts, developers, and learners from the greater Boston area. The group meets monthly to discuss TypeScript features, patterns, tooling, and community projects.
+
+** Special SquiggleConf Meetup Agenda
+
+*** Welcome & Introductions (6:30-7:00)
+- Brief introduction to Boston TS Club
+- Meet the organizers
+- Networking activity: TypeScript Trivia
+
+*** Lightning Talks (7:00-8:00)
+1. "TypeScript Compiler API Deep Dive" - Jake Bailey (Microsoft)
+2. "Building Type-Safe APIs with tRPC" - Local community member
+3. "TypeScript Tooling in Large Monorepos" - David Sherret (Deno)
+4. "Open Mic" - 3-minute slots for attendees
+
+*** Open Discussion & Networking (8:00-8:30)
+- TypeScript career opportunities in Boston
+- Upcoming local events
+- Project collaborations
+
+** How to Participate
+
+*** Lightning Talk Submission
+To submit a lightning talk for the open mic portion:
+#+begin_src typescript :tangle ../tools/scripts/submit-lightning-talk.ts
+import { LightningTalk } from './types';
+
+/**
+ * Submit a lightning talk proposal for the Boston TS Club meetup.
+ * Talks should be 3 minutes maximum.
+ */
+export async function submitLightningTalk(
+  name: string,
+  email: string,
+  title: string,
+  description: string
+): Promise<boolean> {
+  const talk: LightningTalk = {
+    name,
+    email,
+    title,
+    description,
+    duration: 3, // minutes
+    submitted: new Date(),
+  };
+
+  // During the conference, this would post to the API
+  console.log('Lightning talk submitted:', talk);
+  
+  return true;
+}
+#+end_src
+
+** Contact Information
+- *Organizer*: Sarah Chen
+- *Email*: boston-ts-club@example.com
+- *Twitter*: @BostonTSClub
+- *Meetup Group*: [[https://meetup.com/boston-typescript-club][meetup.com/boston-typescript-club]]
+
+** TODO Items [0/3]
+- [ ] Register for the meetup through SquiggleConf app
+- [ ] Prepare icebreaker question for networking
+- [ ] Consider submitting a lightning talk topic

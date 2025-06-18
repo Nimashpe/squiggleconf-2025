@@ -1,0 +1,36 @@
+#+TITLE: SquiggleConf 2025 Notes
+#+AUTHOR: Your Name
+#+DATE: September 18-19, 2025
+#+STARTUP: overview
+#+PROPERTY: header-args :mkdirp yes
+
+* SquiggleConf 2025
+
+Engineering conference for excellent web dev tooling at New England Aquarium, Boston.
+
+** Conference Details
+- *Date*: Thu Sep 18 - Fri Sep 19, 2025
+- *Location*: New England Aquarium, Boston MA 02110
+- *Website*: [[https://2025.squiggleconf.com/][2025.squiggleconf.com]]
+- *Focus*: Go, TypeScript, Rust, and Zig developer tools
+
+** Repository Structure
+This repository contains:
+- Session notes with embedded code examples
+- Speaker information and insights
+- Tool demonstrations and setup guides
+- System diagrams using Mermaid
+- Executable code blocks using Babel
+
+** Quick Links
+- [[file:schedule.org][Conference Schedule]]
+- [[file:day1/index.org][Day 1 Notes]]
+- [[file:day2/index.org][Day 2 Notes]]
+- [[file:tools/setup.org][Development Setup]]
+
+** Building Exports
+To export all notes to HTML/PDF:
+#+begin_src bash :tangle tools/scripts/export-all.sh :shebang "#!/bin/bash"
+# Export all org files to HTML
+find . -name "*.org" -exec emacs --batch --eval "(progn (find-file \"{}\") (org-html-export-to-html))" \;
+#+end_src
