@@ -1,0 +1,494 @@
+#+TITLE: JSR: Designing Package Registry Module Resolution
+#+DATE: <2025-09-19 Fri 14:00>
+#+PROPERTY: header-args:typescript :session *jsr-session* :results output
+#+PROPERTY: header-args:javascript :session *jsr-session* :results output
+#+PROPERTY: header-args:mermaid :file ../diagrams/jsr-%%N.png
+
+* Session Information
+- *Speaker*: David Sherret (Deno developer; creator of ts-morph, dprint, ts-ast-viewer)
+- *Time*: Day 2, 2:00 PM
+- *Topics*: Package Management, Module Resolution, JavaScript Ecosystem
+
+* Pre-Session Research
+- [[https://jsr.io/][JSR Package Registry]]
+- [[https://github.com/denoland/deno_registry2][Deno Registry GitHub]]
+- [[https://github.com/dsherret/ts-morph][ts-morph]]
+- Previous package management solutions (npm, Yarn, pnpm)
+
+* Package Registry Evolution
+
+** Historical Context of JavaScript Package Management
+
+#+begin_src mermaid :file ../diagrams/jsr-package-evolution.png
+flowchart TB
+    npm["npm (2010)"] --> yarn["Yarn (2016)"]
+    npm --> pnpm["pnpm (2017)"]
+    yarn --> yarn2["Yarn 2 (Berry, 2020)"]
+    npm --> CDN["CDNs (unpkg, jsDelivr, etc.)"]
+    CDN --> ESMCDN["ESM CDNs (esm.sh, skypack, etc.)"]
+    ESMCDN --> deno["Deno Modules (2020)"]
+    deno --> JSR["JSR Registry (2023)"]
+    
+    classDef current fill:#f96,stroke:#333,stroke-width:2px;
+    class JSR current;
+#+end_src
+
+** JSR Key Features
+
+#+begin_src mermaid :file ../diagrams/jsr-key-features.png
+mindmap
+  root((JSR))
+    First-class TypeScript
+      Type checking
+      Type definitions bundled
+      No separate @types packages
+    Native ESM
+      No CommonJS
+      Import maps support
+    Cross-runtime
+      Deno
+      Node.js
+      Bun
+      Browsers
+    Versioning
+      Semver
+      Version constraints
+    Security
+      Code verification
+      Auditing
+    Performance
+      Fast installs
+      Optimized resolution
+#+end_src
+
+* Module Resolution Demo
+
+Let's explore how JSR resolves modules with a demo:
+
+#+begin_src typescript :tangle ../tools/demo-projects/jsr-demo/jsr-resolution.ts
+/**
+ * JSR Module Resolution Demo
+ *
+ * This script demonstrates how JSR resolves modules differently
+ * from traditional npm packages.
+ */
+
+// Type definitions for our demo
+type PackageManager = "npm" | "yarn" | "pnpm" | "jsr";
+
+interface ResolutionStep {
+  step: number;
+  description: string;
+  lookupPath?: string;
+  success: boolean;
+  alternative?: string;
+}
+
+interface ResolutionProcess {
+  packageManager: PackageManager;
+  importStatement: string;
+  steps: ResolutionStep[];
+  resolved?: string;
+  error?: string;
+}
+
+// Simulate the resolution process
+function simulateResolution(
+  packageManager: PackageManager,
+  importStatement: string
+): ResolutionProcess {
+  const result: ResolutionProcess = {
+    packageManager,
+    importStatement,
+    steps: [],
+  };
+
+  if (packageManager === "npm" || packageManager === "yarn" || packageManager === "pnpm") {
+    // Traditional Node.js resolution
+    if (importStatement.startsWith("@")) {
+      // Scoped package
+      const [scope, pkg, ...rest] = importStatement.split("/");
+      const scopedPkg = `${scope}/${pkg}`;
+      
+      result.steps.push({
+        step: 1,
+        description: "Check for local file",
+        lookupPath: `./${importStatement}.js`,
+        success: false
+      });
+      
+      result.steps.push({
+        step: 2,
+        description: "Look in node_modules",
+        lookupPath: `./node_modules/${scopedPkg}/package.json`,
+        success: true
+      });
+      
+      result.steps.push({
+        step: 3,
+        description: "Read package.json 'main' field",
+        lookupPath: `./node_modules/${scopedPkg}/index.js`,
+        success: true
+      });
+      
+      if (rest.length > 0) {
+        result.steps.push({
+          step: 4,
+          description: "Resolve subpath",
+          lookupPath: `./node_modules/${scopedPkg}/${rest.join("/")}`,
+          success: true
+        });
+        
+        result.resolved = `./node_modules/${scopedPkg}/${rest.join("/")}.js`;
+      } else {
+        result.resolved = `./node_modules/${scopedPkg}/index.js`;
+      }
+    } else {
+      // Regular package
+      const [pkg, ...rest] = importStatement.split("/");
+      
+      result.steps.push({
+        step: 1,
+        description: "Check for local file",
+        lookupPath: `./${importStatement}.js`,
+        success: false
+      });
+      
+      result.steps.push({
+        step: 2,
+        description: "Look in node_modules",
+        lookupPath: `./node_modules/${pkg}/package.json`,
+        success: true
+      });
+      
+      result.steps.push({
+        step: 3,
+        description: "Read package.json 'main' field",
+        lookupPath: `./node_modules/${pkg}/index.js`,
+        success: true
+      });
+      
+      if (rest.length > 0) {
+        result.steps.push({
+          step: 4,
+          description: "Resolve subpath",
+          lookupPath: `./node_modules/${pkg}/${rest.join("/")}`,
+          success: true
+        });
+        
+        result.resolved = `./node_modules/${pkg}/${rest.join("/")}.js`;
+      } else {
+        result.resolved = `./node_modules/${pkg}/index.js`;
+      }
+    }
+  } else if (packageManager === "jsr") {
+    // JSR resolution
+    if (importStatement.startsWith("@")) {
+      // JSR scope format
+      const [scope, pkg, ...rest] = importStatement.split("/");
+      const jsrPkg = `${scope}/${pkg}`;
+      
+      result.steps.push({
+        step: 1,
+        description: "Check for URL format",
+        success: false,
+        alternative: "Not a URL, checking for JSR package"
+      });
+      
+      result.steps.push({
+        step: 2,
+        description: "Resolve JSR package",
+        lookupPath: `https://jsr.io/${jsrPkg}/[latest-version]`,
+        success: true
+      });
+      
+      if (rest.length > 0) {
+        result.steps.push({
+          step: 3,
+          description: "Resolve subpath",
+          lookupPath: `https://jsr.io/${jsrPkg}/[latest-version]/${rest.join("/")}`,
+          success: true
+        });
+        
+        result.resolved = `https://jsr.io/${jsrPkg}/[latest-version]/${rest.join("/")}`;
+      } else {
+        result.steps.push({
+          step: 3,
+          description: "Load default export",
+          lookupPath: `https://jsr.io/${jsrPkg}/[latest-version]/mod.ts`,
+          success: true
+        });
+        
+        result.resolved = `https://jsr.io/${jsrPkg}/[latest-version]/mod.ts`;
+      }
+    } else {
+      // Regular JSR package (non-scoped)
+      result.steps.push({
+        step: 1,
+        description: "Check for URL format",
+        success: false,
+        alternative: "Not a URL, checking for JSR package"
+      });
+      
+      result.steps.push({
+        step: 2,
+        description: "Resolve JSR package",
+        lookupPath: `https://jsr.io/${importStatement}/[latest-version]`,
+        success: true
+      });
+      
+      result.steps.push({
+        step: 3,
+        description: "Load default export",
+        lookupPath: `https://jsr.io/${importStatement}/[latest-version]/mod.ts`,
+        success: true
+      });
+      
+      result.resolved = `https://jsr.io/${importStatement}/[latest-version]/mod.ts`;
+    }
+  }
+
+  return result;
+}
+
+// Example usage
+function compareResolutions() {
+  const examples = [
+    { pkg: "express", npm: "express", jsr: "@std/express" },
+    { pkg: "React", npm: "react", jsr: "@react/core" },
+    { pkg: "Lodash helpers", npm: "lodash/fp", jsr: "@lodash/fp" }
+  ];
+  
+  for (const example of examples) {
+    console.log(`\n=== ${example.pkg} Resolution ===\n`);
+    
+    const npmResolution = simulateResolution("npm", example.npm);
+    console.log(`npm resolution for "${example.npm}":`);
+    console.log(`Resolved to: ${npmResolution.resolved}\n`);
+    
+    const jsrResolution = simulateResolution("jsr", example.jsr);
+    console.log(`JSR resolution for "${example.jsr}":`);
+    console.log(`Resolved to: ${jsrResolution.resolved}\n`);
+  }
+}
+
+// This would be executed when running the script
+// compareResolutions();
+
+// Export for testing
+export { simulateResolution, compareResolutions };
+#+end_src
+
+* JSR Import Map Example
+
+#+begin_src json :tangle ../tools/demo-projects/jsr-demo/import_map.json
+{
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^0.1.0",
+    "@std/testing": "jsr:@std/testing@^0.1.0",
+    "oak": "jsr:@oak/oak@^12.5.0",
+    "zod": "jsr:@zod/zod@^3.22.2",
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0"
+  },
+  "scopes": {
+    "/testing/": {
+      "@std/assert": "jsr:@std/assert@^0.2.0-alpha"
+    }
+  }
+}
+#+end_src
+
+* JSR vs npm Example Project
+
+Let's create a simple example showing how to use the same library with both JSR and npm:
+
+#+begin_src typescript :tangle ../tools/demo-projects/jsr-demo/npm-version.ts
+// npm version (package.json + node_modules)
+import { z } from 'zod';
+
+const User = z.object({
+  id: z.number(),
+  name: z.string(),
+  email: z.string().email(),
+  age: z.number().optional(),
+});
+
+type User = z.infer<typeof User>;
+
+function validateUser(data: unknown): User {
+  return User.parse(data);
+}
+
+// Example usage
+try {
+  const validUser = validateUser({
+    id: 1,
+    name: 'John Doe',
+    email: 'john@example.com',
+    age: 30,
+  });
+  console.log('Valid user:', validUser);
+  
+  const invalidUser = validateUser({
+    id: 'not-a-number',
+    name: 123,
+    email: 'not-an-email',
+  });
+} catch (error) {
+  console.error('Validation error:', error);
+}
+#+end_src
+
+#+begin_src typescript :tangle ../tools/demo-projects/jsr-demo/jsr-version.ts
+// JSR version (no package.json needed, using import maps)
+import { z } from '@zod/zod';
+
+const User = z.object({
+  id: z.number(),
+  name: z.string(),
+  email: z.string().email(),
+  age: z.number().optional(),
+});
+
+type User = z.infer<typeof User>;
+
+function validateUser(data: unknown): User {
+  return User.parse(data);
+}
+
+// Example usage
+try {
+  const validUser = validateUser({
+    id: 1,
+    name: 'John Doe',
+    email: 'john@example.com',
+    age: 30,
+  });
+  console.log('Valid user:', validUser);
+  
+  const invalidUser = validateUser({
+    id: 'not-a-number',
+    name: 123,
+    email: 'not-an-email',
+  });
+} catch (error) {
+  console.error('Validation error:', error);
+}
+#+end_src
+
+* Creating and Publishing to JSR
+
+#+begin_src bash :tangle ../tools/demo-projects/jsr-demo/publish-jsr.sh
+#!/bin/bash
+
+# Example script showing JSR publishing workflow
+
+# Check for JSR CLI
+if ! command -v jsr &> /dev/null; then
+  echo "JSR CLI not found. Installing..."
+  deno install -A -r https://jsr.io/jsr.js
+fi
+
+# Create a new JSR package
+echo "Creating a new JSR package..."
+mkdir -p my-jsr-package
+cd my-jsr-package
+
+# Initialize JSR package
+echo "Initializing JSR package..."
+jsr init
+
+# Create main module file
+cat > mod.ts << EOF
+/**
+ * My JSR Package
+ * A simple utility library
+ */
+
+/**
+ * Adds two numbers together
+ */
+export function add(a: number, b: number): number {
+  return a + b;
+}
+
+/**
+ * Subtracts one number from another
+ */
+export function subtract(a: number, b: number): number {
+  return a - b;
+}
+
+/**
+ * Formats a string with provided values
+ */
+export function format(template: string, values: Record<string, string>): string {
+  return template.replace(/\${(\w+)}/g, (_, key) => values[key] || '');
+}
+EOF
+
+# Create a test file
+mkdir -p tests
+cat > tests/mod_test.ts << EOF
+import { add, subtract, format } from "../mod.ts";
+import { assertEquals } from "@std/assert";
+
+Deno.test("add works", () => {
+  assertEquals(add(1, 2), 3);
+});
+
+Deno.test("subtract works", () => {
+  assertEquals(subtract(5, 2), 3);
+});
+
+Deno.test("format works", () => {
+  assertEquals(
+    format("Hello, \${name}!", { name: "World" }),
+    "Hello, World!"
+  );
+});
+EOF
+
+# Create a README
+cat > README.md << EOF
+# My JSR Package
+
+A simple utility library published to JSR.
+
+## Installation
+
+```ts
+// Import in Deno, Node.js, Bun, or browsers
+import { add, subtract, format } from "@username/my-jsr-package";
+```
+
+## Usage
+
+```ts
+// Basic math
+add(1, 2); // 3
+subtract(5, 2); // 3
+
+// String formatting
+format("Hello, \${name}!", { name: "World" }); // "Hello, World!"
+```
+EOF
+
+echo "Package created successfully!"
+echo "To publish, run: jsr publish"
+echo "Note: You need to be logged in with jsr login first"
+#+end_src
+
+* Questions to Ask
+- How does JSR handle dependency conflicts compared to npm?
+- What's the performance impact of URL-based imports versus file-based imports?
+- How do you ensure backward compatibility when packages evolve?
+- What challenges do you face with cross-runtime compatibility?
+- How does JSR handle TypeScript types differently from DefinitelyTyped (@types)?
+
+* TODO Items [0/4]
+- [ ] Create a test project using JSR imports
+- [ ] Compare build times: npm vs JSR for same dependencies
+- [ ] Test cross-runtime compatibility (Deno, Node, Bun)
+- [ ] Explore migration strategies from npm to JSR

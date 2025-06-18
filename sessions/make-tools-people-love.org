@@ -1,0 +1,331 @@
+#+TITLE: Make Tools That People Love
+#+DATE: <2025-09-18 Thu 09:00>
+#+PROPERTY: header-args:javascript :session *tools-love* :results output
+#+PROPERTY: header-args:mermaid :file ../diagrams/tools-love-%%N.png
+
+* Session Information
+- *Speaker*: Anthony Fu (Open sourceror and design engineer)
+- *Time*: Day 1, 9:00 AM
+- *Topics*: Developer Experience, Tool Design, Open Source
+
+* Pre-Session Research
+- [[https://github.com/antfu][Anthony Fu's GitHub]]
+- [[https://antfu.me][Anthony Fu's website]]
+- [[https://vueuse.org][VueUse]]
+- [[https://github.com/slidevjs/slidev][Slidev]]
+- [[https://github.com/unocss/unocss][UnoCSS]]
+
+* Key Design Principles
+
+** Developer Experience First
+- Sensible defaults with minimal configuration
+- Progressive disclosure of complexity
+- Instant feedback loops
+- Smart error messages
+
+** Examples of Great DX
+
+#+begin_src mermaid :file ../diagrams/tools-love-dx.png
+graph TD
+    A[Great Developer Experience] --> B[Clear Mental Model]
+    A --> C[Fast Feedback Loop]
+    A --> D[Helpful Error Messages]
+    A --> E[Progressive Complexity]
+    A --> F[Sensible Defaults]
+    
+    B --> G[Easy to reason about]
+    B --> H[Consistent patterns]
+    
+    C --> I[Fast startup time]
+    C --> J[Hot reload]
+    C --> K[Instant validation]
+    
+    D --> L[Actionable suggestions]
+    D --> M[Contextual information]
+    D --> N[Visual hints]
+    
+    E --> O[Simple API surface]
+    E --> P[Advanced options hidden]
+    E --> Q[Escape hatches]
+    
+    F --> R[Works out of the box]
+    F --> S[Convention over configuration]
+    
+    style A fill:#f9a,stroke:#333,stroke-width:4px
+#+end_src
+
+* Tool Version Check Example
+
+This is a simple Babel script to check tool versions in the system:
+
+#+begin_src javascript :tangle ../tools/scripts/tool-version-check.js
+#!/usr/bin/env node
+
+/**
+ * Tool Version Check for SquiggleConf 2025
+ * 
+ * This script checks the versions of common development tools
+ * used in web development tooling.
+ */
+
+const { execSync } = require('child_process');
+const util = require('util');
+const fs = require('fs');
+
+// Tools to check
+const tools = [
+  { name: 'Node.js', command: 'node --version' },
+  { name: 'npm', command: 'npm --version' },
+  { name: 'TypeScript', command: 'tsc --version' },
+  { name: 'Babel', command: 'npx @babel/cli --version' },
+  { name: 'ESLint', command: 'npx eslint --version' },
+  { name: 'Prettier', command: 'npx prettier --version' },
+  { name: 'Vite', command: 'npx vite --version' },
+  { name: 'Rollup', command: 'npx rollup --version' },
+  { name: 'webpack', command: 'npx webpack --version' },
+  { name: 'Rust', command: 'rustc --version' },
+  { name: 'Go', command: 'go version' },
+  { name: 'wasm-pack', command: 'wasm-pack --version' },
+  { name: 'Deno', command: 'deno --version' }
+];
+
+function formatOutput(title, content) {
+  const separator = '='.repeat(title.length + 8);
+  return `\n${separator}\n    ${title}    \n${separator}\n\n${content}\n`;
+}
+
+function checkTool(tool) {
+  try {
+    const output = execSync(tool.command, { encoding: 'utf8' }).trim();
+    return { name: tool.name, version: output, available: true };
+  } catch (error) {
+    return { name: tool.name, version: null, available: false };
+  }
+}
+
+// Main function to check all tools
+function checkAllTools() {
+  console.log(formatOutput('SquiggleConf 2025 Tool Version Check', ''));
+  
+  let markdownOutput = '# Tool Version Check\n\n';
+  markdownOutput += '| Tool | Version | Available |\n';
+  markdownOutput += '|------|---------|----------|\n';
+  
+  const results = tools.map(tool => {
+    const result = checkTool(tool);
+    
+    // Output to console
+    if (result.available) {
+      console.log(`✅ ${result.name}: ${result.version}`);
+    } else {
+      console.log(`❌ ${result.name}: Not available`);
+    }
+    
+    // Add to markdown output
+    markdownOutput += `| ${result.name} | ${result.available ? result.version : 'N/A'} | ${result.available ? '✓' : '✗'} |\n`;
+    
+    return result;
+  });
+  
+  // Save results to markdown file
+  fs.writeFileSync('../diagrams/tool-versions.md', markdownOutput);
+  
+  // Summary
+  const available = results.filter(r => r.available).length;
+  const total = tools.length;
+  
+  console.log(formatOutput('Summary', `${available}/${total} tools available`));
+  
+  if (available < total) {
+    console.log('Missing tools:');
+    results
+      .filter(r => !r.available)
+      .forEach(tool => {
+        console.log(`- ${tool.name}`);
+      });
+  }
+  
+  console.log('\nDetailed report saved to ../diagrams/tool-versions.md');
+}
+
+// Run the check
+checkAllTools();
+#+end_src
+
+* Example UI Component for Tool Version Display
+
+#+begin_src javascript :tangle ../tools/demo-projects/version-display/version-display.js
+// A simple component to display tool versions in a web interface
+
+class ToolVersionDisplay extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this.versions = [];
+  }
+
+  static get observedAttributes() {
+    return ['data-theme'];
+  }
+
+  attributeChangedCallback(name, oldValue, newValue) {
+    if (name === 'data-theme') {
+      this.render();
+    }
+  }
+
+  set data(versions) {
+    this.versions = versions;
+    this.render();
+  }
+
+  connectedCallback() {
+    this.render();
+    this.addEventListener('click', this.handleClick);
+  }
+
+  disconnectedCallback() {
+    this.removeEventListener('click', this.handleClick);
+  }
+
+  handleClick(event) {
+    const action = event.target.dataset.action;
+    if (action === 'refresh') {
+      this.dispatchEvent(new CustomEvent('refresh-versions'));
+    }
+  }
+
+  render() {
+    const theme = this.getAttribute('data-theme') || 'light';
+    
+    const style = `
+      :host {
+        display: block;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+      .container {
+        border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'};
+        border-radius: 8px;
+        overflow: hidden;
+        background: ${theme === 'dark' ? '#222' : '#fff'};
+        color: ${theme === 'dark' ? '#eee' : '#333'};
+      }
+      .header {
+        background: ${theme === 'dark' ? '#333' : '#f5f5f5'};
+        padding: 12px 16px;
+        font-weight: bold;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .refresh-button {
+        background: ${theme === 'dark' ? '#555' : '#e0e0e0'};
+        border: none;
+        border-radius: 4px;
+        padding: 4px 8px;
+        cursor: pointer;
+        color: inherit;
+      }
+      .refresh-button:hover {
+        background: ${theme === 'dark' ? '#666' : '#d0d0d0'};
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th, td {
+        padding: 8px 16px;
+        text-align: left;
+        border-bottom: 1px solid ${theme === 'dark' ? '#444' : '#eee'};
+      }
+      th {
+        font-weight: normal;
+        color: ${theme === 'dark' ? '#aaa' : '#666'};
+      }
+      .status {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 8px;
+      }
+      .available {
+        background-color: #4caf50;
+      }
+      .unavailable {
+        background-color: #f44336;
+      }
+      .empty-state {
+        padding: 24px;
+        text-align: center;
+        color: ${theme === 'dark' ? '#888' : '#999'};
+      }
+    `;
+    
+    let tableContent = '';
+    
+    if (this.versions.length === 0) {
+      tableContent = `
+        <div class="empty-state">
+          No version information available.
+          Click refresh to check tool versions.
+        </div>
+      `;
+    } else {
+      tableContent = `
+        <table>
+          <thead>
+            <tr>
+              <th>Tool</th>
+              <th>Version</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${this.versions.map(tool => `
+              <tr>
+                <td>${tool.name}</td>
+                <td>${tool.version || 'N/A'}</td>
+                <td>
+                  <span class="status ${tool.available ? 'available' : 'unavailable'}"></span>
+                  ${tool.available ? 'Available' : 'Not available'}
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+    
+    this.shadowRoot.innerHTML = `
+      <style>${style}</style>
+      <div class="container">
+        <div class="header">
+          <span>Tool Versions</span>
+          <button class="refresh-button" data-action="refresh">Refresh</button>
+        </div>
+        ${tableContent}
+      </div>
+    `;
+  }
+}
+
+customElements.define('tool-version-display', ToolVersionDisplay);
+
+// Export for module usage
+export { ToolVersionDisplay };
+#+end_src
+
+* Questions to Ask
+- What are the most important principles when designing developer tools?
+- How do you balance simplicity with power/flexibility?
+- What's the process for gathering feedback on tool usability?
+- How do you decide when to break backward compatibility for better DX?
+- What are the unique challenges of maintaining popular open source tools?
+
+* TODO Items [0/5]
+- [ ] Check VueUse repository for DX design patterns
+- [ ] Install UnoCSS to test developer experience
+- [ ] Create a sample mini-tool using principles from the talk
+- [ ] Compare error messages across different tools (TypeScript, ESLint, etc.)
+- [ ] Analyze startup time of various build tools
