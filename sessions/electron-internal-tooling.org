@@ -1,0 +1,695 @@
+#+TITLE: Electron's Internal Tooling: Open Source at Scale
+#+DATE: <2025-09-18 Thu 10:30>
+#+PROPERTY: header-args:javascript :session *electron-tooling* :results output
+#+PROPERTY: header-args:typescript :session *electron-tooling* :results output
+#+PROPERTY: header-args:mermaid :file ../diagrams/electron-tooling-%%N.png
+
+* Session Information
+- *Speaker*: Shelley Vohr (Core eng @electron; collaborator @nodejs)
+- *Time*: Day 1, 10:30 AM
+- *Topics*: Open Source, DevOps, CI/CD, Release Engineering
+
+* Pre-Session Research
+- [[https://github.com/electron/electron][Electron GitHub Repository]]
+- [[https://www.electronjs.org/blog][Electron Blog]]
+- [[https://github.com/electron/governance][Electron Governance]]
+- Previous talks by Shelley Vohr on Node.js and Electron
+
+* Key Topics
+
+** Managing Open Source at Scale
+
+#+begin_src mermaid :file ../diagrams/electron-oss-challenges.png
+mindmap
+  root((Open Source at Scale))
+    Cross-platform challenges
+      Windows
+      macOS
+      Linux
+    Versioning
+      Semantic versioning
+      Breaking changes
+      Deprecation policy
+    CI/CD
+      Automated testing
+      Release channels
+      Security scanning
+    Contributor management
+      Governance
+      Issue triage
+      Pull request review
+    Documentation
+      API reference
+      Tutorials
+      Community resources
+    Release engineering
+      Shipping cadence
+      Update frameworks
+      Distribution mechanisms
+#+end_src
+
+** Electron's Internal Tooling Ecosystem
+
+#+begin_src mermaid :file ../diagrams/electron-tooling-ecosystem.png
+graph TB
+    A[Electron] --> B[Core Tooling]
+    A --> C[CI/CD Infrastructure]
+    A --> D[Testing Infrastructure]
+    A --> E[Release Infrastructure]
+    
+    B --> B1[Build System]
+    B --> B2[GN/Ninja Integration]
+    B --> B3[Node/Chromium Integration Tools]
+    
+    C --> C1[GitHub Actions]
+    C --> C2[Custom CI Runners]
+    C --> C3[Cross-platform Matrix]
+    
+    D --> D1[Spectron]
+    D --> D2[Mocha Tests]
+    D --> D3[Native Tests]
+    
+    E --> E1[Release Automation]
+    E --> E2[Update Server]
+    E --> E3[Auto-updater Client]
+    
+    style A fill:#f96,stroke:#333,stroke-width:4px
+#+end_src
+
+* Example Internal Tooling
+
+** Release Automation Script
+
+#+begin_src typescript :tangle ../tools/demo-projects/electron-tools/release-prep.ts
+/**
+ * Electron Release Preparation Script (Simplified Example)
+ * 
+ * This script demonstrates how Electron might automate parts of the
+ * release preparation process.
+ */
+
+import * as fs from 'fs';
+import * as path from 'path';
+import { execSync } from 'child_process';
+
+interface ReleaseConfig {
+  version: string;
+  npmTag: string;
+  releaseNotes: string;
+  branchName: string;
+  commitHash: string;
+  targetDate: string;
+}
+
+interface VersionComponents {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+class ReleasePreparation {
+  private config: ReleaseConfig;
+  private repoPath: string;
+  private versionComponents: VersionComponents;
+
+  constructor(configPath: string, repoPath: string) {
+    this.repoPath = repoPath;
+    
+    // Load release configuration
+    try {
+      const configContent = fs.readFileSync(configPath, 'utf8');
+      this.config = JSON.parse(configContent);
+    } catch (error) {
+      console.error('Error loading release configuration:', error);
+      throw new Error('Failed to load release configuration');
+    }
+    
+    // Parse version
+    const versionParts = this.config.version.split('.');
+    this.versionComponents = {
+      major: parseInt(versionParts[0], 10),
+      minor: parseInt(versionParts[1], 10),
+      patch: parseInt(versionParts[2], 10)
+    };
+  }
+  
+  /**
+   * Prepare the repository for a release
+   */
+  async prepareRelease() {
+    console.log(`Preparing Electron release ${this.config.version}...`);
+    
+    try {
+      // Switch to the appropriate branch
+      this.checkoutBranch();
+      
+      // Update version numbers
+      this.updateVersionNumbers();
+      
+      // Generate release notes draft
+      this.generateReleaseNotes();
+      
+      // Run tests
+      this.runTests();
+      
+      // Check dependencies
+      this.checkDependencies();
+      
+      console.log(`Release preparation complete for Electron v${this.config.version}`);
+      console.log(`Target release date: ${this.config.targetDate}`);
+      console.log(`Run 'yarn run release' to start the release process.`);
+    } catch (error) {
+      console.error('Error preparing release:', error);
+      process.exit(1);
+    }
+  }
+  
+  /**
+   * Check out the appropriate branch for the release
+   */
+  private checkoutBranch() {
+    console.log(`Checking out branch: ${this.config.branchName}`);
+    try {
+      execSync(`git checkout ${this.config.branchName}`, { 
+        cwd: this.repoPath,
+        stdio: 'inherit'
+      });
+      
+      // Verify commit hash if provided
+      if (this.config.commitHash) {
+        console.log(`Verifying commit hash: ${this.config.commitHash}`);
+        const currentCommit = execSync('git rev-parse HEAD', { 
+          cwd: this.repoPath,
+          encoding: 'utf8'
+        }).trim();
+        
+        if (currentCommit !== this.config.commitHash) {
+          throw new Error(`Current commit ${currentCommit} does not match expected commit ${this.config.commitHash}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking out branch:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Update version numbers in package.json and other files
+   */
+  private updateVersionNumbers() {
+    console.log(`Updating version numbers to ${this.config.version}`);
+    
+    // Update package.json
+    const packageJsonPath = path.join(this.repoPath, 'package.json');
+    try {
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+      packageJson.version = this.config.version;
+      fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n');
+      console.log('Updated package.json');
+    } catch (error) {
+      console.error('Error updating package.json:', error);
+      throw error;
+    }
+    
+    // Update other version files (simplified example)
+    const filesToUpdate = [
+      'VERSION',
+      'shell/browser/resources/win/electron.rc',
+      'shell/common/electron_version.h'
+    ];
+    
+    for (const file of filesToUpdate) {
+      const filePath = path.join(this.repoPath, file);
+      console.log(`Would update version in ${file} (simulation)`);
+      // In a real implementation, we would parse and update these files
+    }
+  }
+  
+  /**
+   * Generate release notes draft
+   */
+  private generateReleaseNotes() {
+    console.log('Generating release notes draft...');
+    
+    // In a real implementation, this might:
+    // 1. Pull data from PRs since the last release
+    // 2. Categorize changes (features, bug fixes, etc.)
+    // 3. Generate Markdown
+    
+    const releaseNotesPath = path.join(this.repoPath, 'RELEASE_NOTES.md');
+    
+    // Simple simulation
+    const releaseNotesContent = `# Electron v${this.config.version}
+    
+## Overview
+
+Release Date: ${this.config.targetDate}
+Branch: ${this.config.branchName}
+Commit: ${this.config.commitHash}
+
+## What's New
+
+${this.config.releaseNotes || '(Release notes will be generated from PRs)'}
+
+## Breaking Changes
+
+- List breaking changes here
+
+## Bug Fixes
+
+- List bug fixes here
+
+## Performance Improvements
+
+- List performance improvements here
+
+## Documentation
+
+- List documentation updates here
+
+## Credits
+
+Thanks to all the contributors who made this release possible!
+`;
+    
+    fs.writeFileSync(releaseNotesPath, releaseNotesContent);
+    console.log(`Release notes draft written to ${releaseNotesPath}`);
+  }
+  
+  /**
+   * Run tests to ensure release quality
+   */
+  private runTests() {
+    console.log('Running tests (simulation)...');
+    
+    // In a real implementation, this would run the test suite
+    // execSync('yarn test', { cwd: this.repoPath, stdio: 'inherit' });
+    
+    console.log('All tests passed!');
+  }
+  
+  /**
+   * Check dependencies for any issues
+   */
+  private checkDependencies() {
+    console.log('Checking dependencies (simulation)...');
+    
+    // In a real implementation, this would:
+    // 1. Check for outdated dependencies
+    // 2. Verify compatibility
+    // 3. Run security audits
+    
+    console.log('No dependency issues found.');
+  }
+}
+
+// Example usage
+if (require.main === module) {
+  const configPath = process.argv[2] || 'release-config.json';
+  const repoPath = process.argv[3] || '.';
+  
+  const release = new ReleasePreparation(configPath, repoPath);
+  release.prepareRelease().catch(console.error);
+}
+
+export { ReleasePreparation };
+#+end_src
+
+** Automated Issue Triage System
+
+#+begin_src typescript :tangle ../tools/demo-projects/electron-tools/issue-triage.ts
+/**
+ * Electron Issue Triage Bot (Simplified Example)
+ * 
+ * This script demonstrates how Electron might automate issue triage
+ * for the large volume of issues in an open source project.
+ */
+
+import { Octokit } from '@octokit/rest';
+
+interface IssueData {
+  id: number;
+  number: number;
+  title: string;
+  body: string;
+  labels: string[];
+  user: {
+    login: string;
+  };
+  created_at: string;
+}
+
+interface TriageResult {
+  issue: IssueData;
+  addLabels: string[];
+  removeLabels: string[];
+  comment?: string;
+}
+
+class IssueTriage {
+  private octokit: Octokit;
+  private owner: string;
+  private repo: string;
+  
+  // Keywords for categorizing issues
+  private readonly categoryKeywords = {
+    'renderer': ['renderer', 'web contents', 'webcontents', 'blink', 'v8', 'dom'],
+    'main': ['main process', 'browser process', 'app', 'browserwindow'],
+    'api': ['api', 'function', 'method', 'return value', 'parameter'],
+    'crash': ['crash', 'segfault', 'segmentation fault', 'sigsegv', 'core dump'],
+    'performance': ['performance', 'slow', 'memory leak', 'cpu', 'memory usage'],
+    'documentation': ['docs', 'documentation', 'example', 'tutorial'],
+    'windows': ['windows', 'win32', 'microsoft', 'win10', 'win11'],
+    'macos': ['macos', 'osx', 'darwin', 'mac', 'apple'],
+    'linux': ['linux', 'ubuntu', 'fedora', 'debian', 'x11', 'wayland']
+  };
+  
+  // Required issue template sections
+  private readonly templateSections = [
+    'description',
+    'electron version',
+    'platform',
+    'expected behavior',
+    'current behavior',
+    'reproduction'
+  ];
+  
+  constructor(token: string, owner: string, repo: string) {
+    this.octokit = new Octokit({ auth: token });
+    this.owner = owner;
+    this.repo = repo;
+  }
+  
+  /**
+   * Get recent issues for triage
+   */
+  async getRecentIssues(count: number = 10): Promise<IssueData[]> {
+    console.log(`Fetching ${count} recent issues for triage...`);
+    
+    try {
+      const response = await this.octokit.issues.listForRepo({
+        owner: this.owner,
+        repo: this.repo,
+        state: 'open',
+        sort: 'created',
+        direction: 'desc',
+        per_page: count
+      });
+      
+      return response.data as IssueData[];
+    } catch (error) {
+      console.error('Error fetching issues:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Perform triage on a single issue
+   */
+  triageIssue(issue: IssueData): TriageResult {
+    console.log(`Triaging issue #${issue.number}: ${issue.title}`);
+    
+    const result: TriageResult = {
+      issue,
+      addLabels: [],
+      removeLabels: []
+    };
+    
+    // Check if issue uses template
+    if (!this.checkIssueTemplate(issue)) {
+      result.addLabels.push('needs-template');
+      result.comment = this.generateTemplateComment();
+      return result;
+    }
+    
+    // Categorize issue based on content
+    this.categorizeIssue(issue, result);
+    
+    // Check for duplicate indicators
+    if (this.checkForDuplicate(issue)) {
+      result.addLabels.push('possible-duplicate');
+    }
+    
+    // Check for good first issue candidates
+    if (this.isGoodFirstIssue(issue)) {
+      result.addLabels.push('good-first-issue');
+    }
+    
+    return result;
+  }
+  
+  /**
+   * Apply triage results to the GitHub issue
+   */
+  async applyTriageResults(result: TriageResult): Promise<void> {
+    const { issue, addLabels, removeLabels, comment } = result;
+    
+    console.log(`Applying triage results for issue #${issue.number}:`);
+    console.log(`- Adding labels: ${addLabels.join(', ')}`);
+    console.log(`- Removing labels: ${removeLabels.join(', ')}`);
+    
+    try {
+      // Add labels
+      if (addLabels.length > 0) {
+        await this.octokit.issues.addLabels({
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issue.number,
+          labels: addLabels
+        });
+      }
+      
+      // Remove labels
+      for (const label of removeLabels) {
+        await this.octokit.issues.removeLabel({
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issue.number,
+          name: label
+        });
+      }
+      
+      // Add comment if necessary
+      if (comment) {
+        await this.octokit.issues.createComment({
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issue.number,
+          body: comment
+        });
+      }
+      
+      console.log(`Triage applied successfully for issue #${issue.number}`);
+    } catch (error) {
+      console.error(`Error applying triage for issue #${issue.number}:`, error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Check if the issue follows the template
+   */
+  private checkIssueTemplate(issue: IssueData): boolean {
+    const body = issue.body.toLowerCase();
+    
+    // Check for presence of required sections
+    const missingSections = this.templateSections.filter(section => 
+      !body.includes(section.toLowerCase())
+    );
+    
+    return missingSections.length === 0;
+  }
+  
+  /**
+   * Categorize issue based on its content
+   */
+  private categorizeIssue(issue: IssueData, result: TriageResult): void {
+    const content = `${issue.title} ${issue.body}`.toLowerCase();
+    
+    // Check for each category
+    for (const [category, keywords] of Object.entries(this.categoryKeywords)) {
+      if (keywords.some(keyword => content.includes(keyword))) {
+        result.addLabels.push(category);
+      }
+    }
+    
+    // Add type label based on content analysis
+    if (content.includes('feature') || content.includes('enhancement')) {
+      result.addLabels.push('enhancement');
+    } else if (content.includes('bug') || content.includes('issue') || content.includes('problem')) {
+      result.addLabels.push('bug');
+    } else {
+      result.addLabels.push('question');
+    }
+  }
+  
+  /**
+   * Check for indicators that this might be a duplicate issue
+   */
+  private checkForDuplicate(issue: IssueData): boolean {
+    // This would be more sophisticated in a real implementation,
+    // possibly using a database of known issues or NLP
+    const commonDuplicatePatterns = [
+      'same as issue',
+      'similar to',
+      'duplicate of',
+      'already reported'
+    ];
+    
+    const content = `${issue.title} ${issue.body}`.toLowerCase();
+    return commonDuplicatePatterns.some(pattern => content.includes(pattern));
+  }
+  
+  /**
+   * Check if this could be a good first issue
+   */
+  private isGoodFirstIssue(issue: IssueData): boolean {
+    // This would have more sophisticated logic in a real implementation
+    const content = `${issue.title} ${issue.body}`.toLowerCase();
+    
+    // Simple heuristics for demo purposes
+    const isDocumentation = content.includes('documentation') || content.includes('docs');
+    const isSimpleFix = content.includes('typo') || content.includes('simple fix');
+    const isComplex = 
+      content.includes('crash') || 
+      content.includes('segfault') ||
+      content.includes('performance') ||
+      content.length > 3000; // Long issues are likely complex
+    
+    return (isDocumentation || isSimpleFix) && !isComplex;
+  }
+  
+  /**
+   * Generate a comment asking for template usage
+   */
+  private generateTemplateComment(): string {
+    return `
+Thank you for reporting this issue! 
+
+It appears that this issue doesn't follow our issue template. Using the template helps us triage issues more effectively and ensures we have all the information needed to investigate.
+
+Could you please edit your issue to include all the sections from our issue template? This includes:
+${this.templateSections.map(section => `- ${section}`).join('\n')}
+
+You can find our issue template when you create a new issue. Thanks for your understanding!
+`;
+  }
+}
+
+// Example usage (would need a GitHub token to actually run)
+async function runTriageDemo() {
+  const token = process.env.GITHUB_TOKEN || 'fake-token';
+  const triage = new IssueTriage(token, 'electron', 'electron');
+  
+  try {
+    // Simulated issues for demo purposes
+    const sampleIssues: IssueData[] = [
+      {
+        id: 1,
+        number: 12345,
+        title: 'Crash when opening DevTools on Windows',
+        body: `
+Description: The application crashes when DevTools is opened
+Electron version: 25.0.0
+Platform: Windows 10
+Expected behavior: DevTools should open without crashing
+Current behavior: The application crashes with a segmentation fault
+Reproduction: 1. Open app 2. Right-click 3. Select "Inspect Element"
+`,
+        labels: [],
+        user: { login: 'user1' },
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 2,
+        number: 12346,
+        title: 'Feature request: Add API for accessing clipboard history',
+        body: `
+I'd like to request a new API for accessing clipboard history.
+This would be useful for my application which needs to track copied items.
+
+Thanks!
+`,
+        labels: [],
+        user: { login: 'user2' },
+        created_at: new Date().toISOString()
+      }
+    ];
+    
+    // Perform triage
+    for (const issue of sampleIssues) {
+      const result = triage.triageIssue(issue);
+      console.log(JSON.stringify(result, null, 2));
+      
+      // This would actually apply the results in a real implementation
+      // await triage.applyTriageResults(result);
+    }
+  } catch (error) {
+    console.error('Error running triage demo:', error);
+  }
+}
+
+// Run the demo if executed directly
+if (require.main === module) {
+  runTriageDemo().catch(console.error);
+}
+
+export { IssueTriage };
+#+end_src
+
+* CI/CD Infrastructure
+
+#+begin_src mermaid :file ../diagrams/electron-cicd.png
+flowchart TB
+    PR[Pull Request] --> CI[CI Pipeline]
+    CI --> Build[Cross-Platform Build]
+    CI --> Test[Test Suite]
+    CI --> Lint[Linting]
+    CI --> Security[Security Scan]
+    
+    Build --> Win[Windows Build]
+    Build --> Mac[macOS Build]
+    Build --> Linux[Linux Build]
+    
+    Test --> UnitTests[Unit Tests]
+    Test --> IntegTests[Integration Tests]
+    Test --> APITests[API Tests]
+    
+    Security --> DependencyScan[Dependency Scan]
+    Security --> CodeScan[Static Analysis]
+    
+    Win --> Artifacts[Build Artifacts]
+    Mac --> Artifacts
+    Linux --> Artifacts
+    
+    UnitTests --> TestResults[Test Results]
+    IntegTests --> TestResults
+    APITests --> TestResults
+    
+    Artifacts --> Release[Release Pipeline]
+    TestResults --> Release
+    
+    Release --> Draft[Release Draft]
+    Draft --> Staging[Staging Release]
+    Staging --> Production[Production Release]
+    
+    Production --> NPM[NPM Package]
+    Production --> GitHub[GitHub Release]
+    Production --> CDN[Download CDN]
+    
+    style PR fill:#f96,stroke:#333,stroke-width:2px
+    style Release fill:#f96,stroke:#333,stroke-width:2px
+    style Production fill:#f96,stroke:#333,stroke-width:2px
+#+end_src
+
+* Questions to Ask
+- How has Electron's internal tooling evolved over time?
+- What were the biggest challenges in scaling Electron's CI/CD pipeline?
+- How do you balance automation with manual oversight for releases?
+- What tools have been most effective for managing the open source community?
+- How do you prioritize and coordinate work across multiple platforms?
+
+* TODO Items [0/3]
+- [ ] Analyze Electron's GitHub Actions workflows
+- [ ] Review Electron's governance model and issue triage process
+- [ ] Study Electron's release engineering approach

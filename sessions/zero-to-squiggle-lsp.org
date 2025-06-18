@@ -1,0 +1,596 @@
+#+TITLE: Zero to Squiggle with the Language Server Protocol
+#+DATE: <2025-09-19 Fri 15:30>
+#+PROPERTY: header-args:typescript :session *lsp-session* :results output
+#+PROPERTY: header-args:rust :session *lsp-session* :results output
+#+PROPERTY: header-args:mermaid :file ../diagrams/lsp-%%N.png
+
+* Session Information
+- *Speaker*: TJ DeVries (Neovim core team)
+- *Time*: Day 2, 3:30 PM
+- *Topics*: Language Servers, Editor Integration, Developer Tools
+
+* Pre-Session Research
+- [[https://microsoft.github.io/language-server-protocol/][Language Server Protocol (LSP) Specification]]
+- [[https://github.com/neovim/neovim][Neovim GitHub]]
+- [[https://github.com/neovim/nvim-lspconfig][nvim-lspconfig]]
+- [[https://code.visualstudio.com/api/language-extensions/language-server-extension-guide][VS Code LSP Extension Guide]]
+
+* What is the Language Server Protocol?
+
+#+begin_src mermaid :file ../diagrams/lsp-overview.png
+graph TD
+    Developer[Developer] -->|Uses| Editor[Code Editor]
+    Editor -->|Sends requests| LS[Language Server]
+    LS -->|Responds with| Features[Editor Features]
+    
+    Features -->|Code completion| Completion[Auto-completion]
+    Features -->|Jump to definition| GoTo[Go to Definition]
+    Features -->|Symbol search| Symbols[Symbol Search]
+    Features -->|Error checking| Diagnostics[Diagnostics]
+    Features -->|Code fixes| CodeActions[Code Actions]
+    Features -->|Documentation| Hover[Hover Info]
+    
+    LS -->|Analyzes| Code[Source Code]
+    
+    subgraph "Multiple Editors"
+        VSCode[VS Code]
+        Vim[Vim/Neovim]
+        Emacs[Emacs]
+        Atom[Atom]
+        Sublime[Sublime Text]
+    end
+    
+    subgraph "Multiple Languages"
+        TS[TypeScript]
+        Rust[Rust]
+        Python[Python]
+        Go[Go]
+        Ruby[Ruby]
+    end
+    
+    Editor --- VSCode
+    Editor --- Vim
+    Editor --- Emacs
+    Editor --- Atom
+    Editor --- Sublime
+    
+    LS --- TS
+    LS --- Rust
+    LS --- Python
+    LS --- Go
+    LS --- Ruby
+    
+    style Developer fill:#f9f,stroke:#333,stroke-width:2px
+    style LS fill:#f96,stroke:#333,stroke-width:4px
+    style Editor fill:#9cf,stroke:#333,stroke-width:2px
+#+end_src
+
+** Benefits of LSP
+
+#+begin_src mermaid :file ../diagrams/lsp-benefits.png
+mindmap
+  root((LSP Benefits))
+    Write once, use everywhere
+      Supports many editors
+      Consistent experience
+      Unified codebase
+    Rich language features
+      Autocomplete
+      Error checking
+      Navigation
+      Refactoring
+    Lower barrier to entry
+      Easier to create language tools
+      Smaller teams can build support
+      Unified protocol
+    Separation of concerns
+      Editor handles UI
+      Server handles language specifics
+      Clean interfaces
+#+end_src
+
+* LSP Architecture and Message Flow
+
+#+begin_src mermaid :file ../diagrams/lsp-message-flow.png
+sequenceDiagram
+    participant Editor
+    participant Client as LSP Client
+    participant Server as Language Server
+    
+    Editor->>Client: User opens file
+    Client->>Server: initialize
+    Server->>Client: initialize result
+    Client->>Server: initialized
+    
+    Client->>Server: textDocument/didOpen
+    Server->>Client: textDocument/publishDiagnostics
+    
+    Editor->>Client: User edits file
+    Client->>Server: textDocument/didChange
+    Server->>Client: textDocument/publishDiagnostics
+    
+    Editor->>Client: User requests completion
+    Client->>Server: textDocument/completion
+    Server->>Client: completion results
+    Client->>Editor: Display completions
+    
+    Editor->>Client: User hovers on symbol
+    Client->>Server: textDocument/hover
+    Server->>Client: hover result
+    Client->>Editor: Display hover info
+    
+    Editor->>Client: User requests definition
+    Client->>Server: textDocument/definition
+    Server->>Client: definition location
+    Client->>Editor: Jump to definition
+    
+    Editor->>Client: User closes file
+    Client->>Server: textDocument/didClose
+    
+    Editor->>Client: Editor shutting down
+    Client->>Server: shutdown
+    Server->>Client: shutdown result
+    Client->>Server: exit
+#+end_src
+
+* Building a Simple Language Server
+
+Let's create a simplified example of a language server for a fictional "Squiggle" language.
+
+** 1. Setting Up the Project Structure
+
+#+begin_src typescript :tangle ../tools/demo-projects/squiggle-lsp/package.json
+{
+  "name": "squiggle-lsp",
+  "version": "0.1.0",
+  "description": "Language Server for the Squiggle language",
+  "main": "dist/server.js",
+  "scripts": {
+    "compile": "tsc -b",
+    "watch": "tsc -b -w",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "vscode-languageserver": "^8.1.0",
+    "vscode-languageserver-textdocument": "^1.0.8"
+  },
+  "devDependencies": {
+    "@types/node": "^18.15.0",
+    "typescript": "^5.0.0"
+  }
+}
+#+end_src
+
+** 2. Creating the Language Server
+
+#+begin_src typescript :tangle ../tools/demo-projects/squiggle-lsp/src/server.ts
+import {
+  createConnection,
+  TextDocuments,
+  Diagnostic,
+  DiagnosticSeverity,
+  ProposedFeatures,
+  InitializeParams,
+  TextDocumentSyncKind,
+  InitializeResult,
+  CompletionItem,
+  CompletionItemKind,
+  TextDocumentPositionParams,
+  Position,
+  Range,
+  Hover,
+  MarkupContent,
+  MarkupKind
+} from 'vscode-languageserver/node';
+
+import { TextDocument } from 'vscode-languageserver-textdocument';
+
+// Create a connection for the server
+const connection = createConnection(ProposedFeatures.all);
+
+// Create a document manager
+const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
+
+// Example Squiggle language keywords
+const KEYWORDS = [
+  'squiggle', 'draw', 'line', 'curve', 'color', 'width',
+  'style', 'dotted', 'dashed', 'solid', 'arrow', 'label',
+  'connect', 'point', 'group', 'layer', 'export'
+];
+
+// Documentation for keywords
+const KEYWORD_DOCS: Record<string, string> = {
+  'squiggle': 'Define a new squiggle drawing',
+  'draw': 'Draw a shape or path',
+  'line': 'Create a straight line',
+  'curve': 'Create a curved line',
+  'color': 'Set the color for drawing elements',
+  'width': 'Set the width of lines',
+  'style': 'Set the style of lines',
+  'dotted': 'Use a dotted line style',
+  'dashed': 'Use a dashed line style',
+  'solid': 'Use a solid line style',
+  'arrow': 'Add an arrow to the end of a line',
+  'label': 'Add text label to an element',
+  'connect': 'Connect two points or elements',
+  'point': 'Define a point with x,y coordinates',
+  'group': 'Group multiple elements together',
+  'layer': 'Create a new drawing layer',
+  'export': 'Export the drawing to various formats'
+};
+
+connection.onInitialize((params: InitializeParams) => {
+  const result: InitializeResult = {
+    capabilities: {
+      textDocumentSync: TextDocumentSyncKind.Incremental,
+      // Enable completion support
+      completionProvider: {
+        resolveProvider: true,
+        triggerCharacters: ['.', ' ']
+      },
+      // Enable hover support
+      hoverProvider: true,
+      // We could add more capabilities like:
+      // - documentSymbolProvider
+      // - definitionProvider
+      // - referencesProvider
+      // - etc.
+    }
+  };
+  
+  return result;
+});
+
+// Initialize
+connection.onInitialized(() => {
+  connection.console.log('Squiggle Language Server initialized!');
+});
+
+// Provide diagnostics for a document
+async function validateTextDocument(textDocument: TextDocument): Promise<void> {
+  const text = textDocument.getText();
+  const diagnostics: Diagnostic[] = [];
+  
+  // Simple pattern to check for unclosed squiggle blocks
+  const openSquiggles = (text.match(/squiggle\s+\w+\s*\{/g) || []).length;
+  const closeSquiggles = (text.match(/\}/g) || []).length;
+  
+  if (openSquiggles > closeSquiggles) {
+    // Find the position of the last squiggle
+    const lastSquiggleMatch = /squiggle\s+\w+\s*\{/g.exec(text);
+    if (lastSquiggleMatch && lastSquiggleMatch.index !== undefined) {
+      const start = textDocument.positionAt(lastSquiggleMatch.index);
+      const end = textDocument.positionAt(lastSquiggleMatch.index + lastSquiggleMatch[0].length);
+      
+      diagnostics.push({
+        severity: DiagnosticSeverity.Error,
+        range: {
+          start,
+          end
+        },
+        message: `Unclosed squiggle block. Expected '}'.`,
+        source: 'squiggle-lsp'
+      });
+    }
+  }
+  
+  // Check for unknown keywords
+  const wordRegex = /\b(\w+)\b/g;
+  let match: RegExpExecArray | null;
+  
+  while ((match = wordRegex.exec(text)) !== null) {
+    const word = match[1];
+    // Skip numbers
+    if (/^\d+$/.test(word)) continue;
+    
+    // Check if it's a variable declaration
+    const isVarDeclaration = /let\s+(\w+)/.exec(text.slice(Math.max(0, match.index - 5), match.index + word.length + 1));
+    if (isVarDeclaration && isVarDeclaration[1] === word) continue;
+    
+    // Check if the word is not a keyword and not following certain patterns
+    if (!KEYWORDS.includes(word) && 
+        !/^[xy]\d*$/.test(word) && // Allow x1, y2, etc. as coordinates
+        !/(let|const|var|function)/.test(word) && // Allow JavaScript keywords
+        !/^[A-Z][A-Za-z]+$/.test(word)) { // Allow PascalCase names for types
+      
+      const start = textDocument.positionAt(match.index);
+      const end = textDocument.positionAt(match.index + word.length);
+      
+      diagnostics.push({
+        severity: DiagnosticSeverity.Warning,
+        range: {
+          start,
+          end
+        },
+        message: `Unknown Squiggle keyword: '${word}'.`,
+        source: 'squiggle-lsp'
+      });
+    }
+  }
+  
+  // Send the diagnostics to the client
+  connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
+}
+
+// Listen for document changes
+documents.onDidChangeContent(change => {
+  validateTextDocument(change.document);
+});
+
+// Handle completion requests
+connection.onCompletion(
+  (params: TextDocumentPositionParams): CompletionItem[] => {
+    // Get the document and position
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+      return [];
+    }
+    
+    // Get the word at position
+    const text = document.getText();
+    const position = params.position;
+    const offset = document.offsetAt(position);
+    
+    // Simple prefix detection
+    let start = offset - 1;
+    while (start >= 0 && /[\w]/.test(text.charAt(start))) {
+      start--;
+    }
+    start++;
+    
+    const prefix = text.substring(start, offset).toLowerCase();
+    
+    // Filter keywords by prefix
+    return KEYWORDS
+      .filter(keyword => keyword.startsWith(prefix))
+      .map(keyword => ({
+        label: keyword,
+        kind: CompletionItemKind.Keyword,
+        detail: KEYWORD_DOCS[keyword] || '',
+        data: { keyword }
+      }));
+  }
+);
+
+// Handle completion item resolve
+connection.onCompletionResolve(
+  (item: CompletionItem): CompletionItem => {
+    // Add more details to the completion item
+    if (item.data?.keyword && KEYWORD_DOCS[item.data.keyword]) {
+      item.documentation = {
+        kind: MarkupKind.Markdown,
+        value: [
+          '```squiggle',
+          `${item.data.keyword}`,
+          '```',
+          '',
+          KEYWORD_DOCS[item.data.keyword]
+        ].join('\n')
+      };
+    }
+    return item;
+  }
+);
+
+// Handle hover requests
+connection.onHover(
+  (params: TextDocumentPositionParams): Hover | null => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+      return null;
+    }
+    
+    // Get the word at position
+    const text = document.getText();
+    const position = params.position;
+    const offset = document.offsetAt(position);
+    
+    // Find the word at the position
+    let start = offset;
+    while (start > 0 && /[\w]/.test(text.charAt(start - 1))) {
+      start--;
+    }
+    
+    let end = offset;
+    while (end < text.length && /[\w]/.test(text.charAt(end))) {
+      end++;
+    }
+    
+    const word = text.substring(start, end);
+    
+    // Check if it's a keyword
+    if (KEYWORDS.includes(word)) {
+      const range: Range = {
+        start: document.positionAt(start),
+        end: document.positionAt(end)
+      };
+      
+      const contents: MarkupContent = {
+        kind: MarkupKind.Markdown,
+        value: [
+          '```squiggle',
+          `${word}`,
+          '```',
+          '',
+          KEYWORD_DOCS[word] || 'No documentation available'
+        ].join('\n')
+      };
+      
+      return { contents, range };
+    }
+    
+    return null;
+  }
+);
+
+// Listen for document opens
+documents.onDidOpen(event => {
+  connection.console.log(`Document opened: ${event.document.uri}`);
+  validateTextDocument(event.document);
+});
+
+// Listen for document closes
+documents.onDidClose(event => {
+  connection.console.log(`Document closed: ${event.document.uri}`);
+});
+
+// Register the document manager
+documents.listen(connection);
+
+// Start the server
+connection.listen();
+#+end_src
+
+** 3. Setting Up the VS Code Extension
+
+#+begin_src typescript :tangle ../tools/demo-projects/squiggle-lsp/src/extension.ts
+import * as path from 'path';
+import { ExtensionContext } from 'vscode';
+import {
+  LanguageClient,
+  LanguageClientOptions,
+  ServerOptions,
+  TransportKind
+} from 'vscode-languageclient/node';
+
+let client: LanguageClient;
+
+export function activate(context: ExtensionContext) {
+  // The server is implemented in Node
+  const serverModule = context.asAbsolutePath(
+    path.join('dist', 'server.js')
+  );
+  
+  // Server debug options
+  const debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
+  
+  // Server options
+  const serverOptions: ServerOptions = {
+    run: { module: serverModule, transport: TransportKind.ipc },
+    debug: {
+      module: serverModule,
+      transport: TransportKind.ipc,
+      options: debugOptions
+    }
+  };
+  
+  // Client options
+  const clientOptions: LanguageClientOptions = {
+    // Register the server for Squiggle documents
+    documentSelector: [{ scheme: 'file', language: 'squiggle' }],
+    synchronize: {
+      // Notify the server about file changes
+      fileEvents: workspace.createFileSystemWatcher('**/.squigglerc')
+    }
+  };
+  
+  // Create and start the client
+  client = new LanguageClient(
+    'squiggleLsp',
+    'Squiggle Language Server',
+    serverOptions,
+    clientOptions
+  );
+  
+  // Start the client and server
+  client.start();
+}
+
+export function deactivate(): Thenable<void> | undefined {
+  if (!client) {
+    return undefined;
+  }
+  return client.stop();
+}
+#+end_src
+
+** 4. Neovim Integration Example
+
+#+begin_src lua :tangle ../tools/demo-projects/squiggle-lsp/nvim-setup.lua
+-- Add to your init.lua or init.vim
+
+-- Set up the squiggle language server
+require('lspconfig').squiggle_lsp.setup {
+  cmd = { "node", "/path/to/squiggle-lsp/dist/server.js", "--stdio" },
+  filetypes = { "squiggle" },
+  root_dir = function(fname)
+    return require('lspconfig').util.find_git_ancestor(fname) or
+           vim.fn.getcwd()
+  end,
+  settings = {
+    -- Any server-specific settings would go here
+  }
+}
+
+-- Register .sq files as squiggle
+vim.cmd [[
+  augroup Squiggle
+    autocmd!
+    autocmd BufNewFile,BufRead *.sq setfiletype squiggle
+  augroup END
+]]
+
+-- Basic highlighting for Squiggle files
+vim.cmd [[
+  syntax match squiggleKeyword "\<\(squiggle\|draw\|line\|curve\|color\|width\|style\|dotted\|dashed\|solid\|arrow\|label\|connect\|point\|group\|layer\|export\)\>"
+  highlight link squiggleKeyword Keyword
+]]
+#+end_src
+
+* Extending the Language Server
+
+** Adding More Features
+
+#+begin_src mermaid :file ../diagrams/lsp-advanced-features.png
+graph TB
+    LSP[Language Server Protocol] --> Basic[Basic Features]
+    LSP --> Advanced[Advanced Features]
+    
+    Basic --> Diagnostics[Diagnostics]
+    Basic --> Completion[Completion]
+    Basic --> Hover[Hover]
+    Basic --> GoTo[Go to Definition]
+    
+    Advanced --> Refactoring[Refactoring]
+    Advanced --> CodeActions[Code Actions]
+    Advanced --> Rename[Rename]
+    Advanced --> Formatting[Formatting]
+    Advanced --> CodeLens[CodeLens]
+    Advanced --> Symbols[Document/Workspace Symbols]
+    Advanced --> References[Find References]
+    Advanced --> SemanticTokens[Semantic Tokens]
+    
+    style LSP fill:#f96,stroke:#333,stroke-width:4px
+    style Advanced fill:#9cf,stroke:#333,stroke-width:2px
+#+end_src
+
+** Language Server Lifecycle
+
+#+begin_src mermaid :file ../diagrams/lsp-lifecycle.png
+stateDiagram-v2
+    [*] --> Started: Launch server
+    Started --> Initialized: initialize
+    Initialized --> Running: initialized
+    Running --> ShuttingDown: shutdown
+    ShuttingDown --> Exited: exit
+    Exited --> [*]
+    
+    state Running {
+        [*] --> Idle
+        Idle --> Processing: Request received
+        Processing --> Idle: Response sent
+    }
+#+end_src
+
+* Questions to Ask
+- What are the challenges of implementing a language server for a new language?
+- How do you handle performance issues with large codebases?
+- What are some best practices for testing language servers?
+- How do you manage the complexity of implementing all LSP features?
+- What's the future of the Language Server Protocol?
+
+* TODO Items [0/4]
+- [ ] Implement a simple grammar parser for Squiggle
+- [ ] Add more advanced LSP features like code actions
+- [ ] Test the language server with different editors
+- [ ] Create example Squiggle programs to test with

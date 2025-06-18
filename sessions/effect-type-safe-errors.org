@@ -1,0 +1,542 @@
+#+TITLE: Effect: Type-Safe Errors and Dependency Injection
+#+DATE: <2025-09-18 Thu 16:00>
+#+PROPERTY: header-args:typescript :session *effect-session* :results output
+#+PROPERTY: header-args:mermaid :file ../diagrams/effect-%%N.png
+
+* Session Information
+- *Speaker*: Mattia Manzati (Founding engineer, Effectful Technologies)
+- *Time*: Day 1, 4:00 PM
+- *Topics*: TypeScript, Functional Programming, Error Handling, Dependency Injection
+
+* Pre-Session Research
+- [[https://effect.website/][Effect website]]
+- [[https://github.com/Effect-TS/effect][Effect GitHub repository]]
+- [[https://www.youtube.com/watch?v=gY_SQ9tM0eg][Introduction to Effect talk]]
+- Background on functional programming in TypeScript
+
+* Key Concepts
+
+** Why Effect?
+
+#+begin_src mermaid :file ../diagrams/effect-why.png
+mindmap
+  root((Why Effect?))
+    Type-safe error handling
+      Eliminate runtime surprises
+      Better than try/catch
+      No more "any" error types
+    Dependency injection
+      No more global state
+      Testable code
+      Easy mocking
+    Resource management
+      Automatic cleanup
+      Parallel resource usage
+      Leak prevention
+    Concurrency
+      Structured concurrency
+      Fiber-based
+      Interruption handling
+    Developer experience
+      Great TypeScript integration
+      Readable stack traces
+      Intuitive API
+#+end_src
+
+** Traditional Error Handling vs Effect
+
+#+begin_src mermaid :file ../diagrams/effect-error-comparison.png
+graph TB
+    subgraph "Traditional Approach"
+        A1[try] --> B1[function call]
+        B1 --> C1{error?}
+        C1 -->|yes| D1[catch]
+        C1 -->|no| E1[process result]
+        D1 --> F1[handle error]
+        style A1 fill:#f96,stroke:#333,stroke-width:1px
+        style D1 fill:#f96,stroke:#333,stroke-width:1px
+        style F1 fill:#f96,stroke:#333,stroke-width:1px
+    end
+    
+    subgraph "Effect Approach"
+        A2[Effect.try] --> B2[returns Effect<A, E>]
+        B2 --> C2[pipe through operations]
+        C2 --> D2[handle error with match/catchAll]
+        C2 --> E2[map successful result]
+        D2 --> F2[runPromise/runSync]
+        E2 --> F2
+        style B2 fill:#f96,stroke:#333,stroke-width:1px
+        style D2 fill:#f96,stroke:#333,stroke-width:1px
+        style E2 fill:#f96,stroke:#333,stroke-width:1px
+    end
+#+end_src
+
+* Basic Effect Examples
+
+#+begin_src typescript :tangle ../tools/demo-projects/effect-demo/basic.ts
+import { Effect, Console, pipe } from "effect";
+
+// A simple effect that always succeeds
+const helloWorld = Effect.succeed("Hello, World!");
+
+// An effect that might fail
+const mayFail = (shouldFail: boolean): Effect.Effect<string, Error> =>
+  shouldFail
+    ? Effect.fail(new Error("Something went wrong"))
+    : Effect.succeed("Operation succeeded");
+
+// Running effects
+const runBasicExamples = async () => {
+  // Run a successful effect
+  const result1 = await Effect.runPromise(helloWorld);
+  console.log("Result 1:", result1);
+
+  // Run a failing effect and handle errors
+  const result2 = await Effect.runPromise(
+    pipe(
+      mayFail(true),
+      Effect.catchAll((error) => Effect.succeed(`Caught error: ${error.message}`))
+    )
+  );
+  console.log("Result 2:", result2);
+
+  // Chain multiple effects
+  const combined = pipe(
+    Effect.succeed(10),
+    Effect.map((n) => n * 2),
+    Effect.flatMap((n) => Effect.succeed(`The number is ${n}`)),
+    Effect.tap((message) => Console.log(message))
+  );
+
+  await Effect.runPromise(combined);
+};
+
+// Call this to run the examples
+// runBasicExamples().catch(console.error);
+
+export { helloWorld, mayFail, runBasicExamples };
+#+end_src
+
+* Type-Safe Error Handling
+
+#+begin_src typescript :tangle ../tools/demo-projects/effect-demo/typed-errors.ts
+import { Effect, pipe, Console, Data } from "effect";
+
+// Define custom error types with Data
+class NotFoundError extends Data.TaggedError("NotFoundError")<{
+  readonly id: string;
+}> {}
+
+class ValidationError extends Data.TaggedError("ValidationError")<{
+  readonly field: string;
+  readonly message: string;
+}> {}
+
+class DatabaseError extends Data.TaggedError("DatabaseError")<{
+  readonly query: string;
+  readonly cause: unknown;
+}> {}
+
+// User type for our example
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+// Simulated database functions
+const findUser = (
+  id: string
+): Effect.Effect<User, NotFoundError | DatabaseError> => {
+  if (id === "invalid-id") {
+    return Effect.fail(new NotFoundError({ id }));
+  }
+  if (id === "db-error") {
+    return Effect.fail(
+      new DatabaseError({ 
+        query: `SELECT * FROM users WHERE id = '${id}'`, 
+        cause: "Connection lost" 
+      })
+    );
+  }
+  return Effect.succeed({
+    id,
+    name: "John Doe",
+    email: "john@example.com",
+  });
+};
+
+const validateEmail = (
+  email: string
+): Effect.Effect<string, ValidationError> => {
+  if (!email.includes("@")) {
+    return Effect.fail(
+      new ValidationError({ field: "email", message: "Invalid email format" })
+    );
+  }
+  return Effect.succeed(email);
+};
+
+const updateUserEmail = (
+  userId: string,
+  newEmail: string
+): Effect.Effect<
+  User,
+  NotFoundError | ValidationError | DatabaseError
+> => {
+  return pipe(
+    // Find the user
+    findUser(userId),
+    // Validate the new email
+    Effect.flatMap((user) =>
+      pipe(
+        validateEmail(newEmail),
+        Effect.map((validatedEmail) => ({
+          ...user,
+          email: validatedEmail,
+        }))
+      )
+    )
+  );
+};
+
+// Type-specific error handling
+const handleUpdateError = <R, E, A>(
+  effect: Effect.Effect<A, E, R>
+): Effect.Effect<A | string, never, R> => {
+  return pipe(
+    effect,
+    Effect.catchTags({
+      NotFoundError: (error) =>
+        Effect.succeed(`User with ID ${error.id} not found`),
+      ValidationError: (error) =>
+        Effect.succeed(`Validation failed: ${error.field} - ${error.message}`),
+      DatabaseError: (error) =>
+        Effect.succeed(`Database error in query "${error.query}": ${error.cause}`)
+    })
+  );
+};
+
+// Example of running with different scenarios
+const runTypedErrorExamples = async () => {
+  // Successful case
+  const result1 = await Effect.runPromise(
+    pipe(
+      updateUserEmail("valid-id", "new-email@example.com"),
+      handleUpdateError,
+      Effect.tap((result) => Console.log("Result 1:", result))
+    )
+  );
+
+  // Not found error
+  const result2 = await Effect.runPromise(
+    pipe(
+      updateUserEmail("invalid-id", "new-email@example.com"),
+      handleUpdateError,
+      Effect.tap((result) => Console.log("Result 2:", result))
+    )
+  );
+
+  // Validation error
+  const result3 = await Effect.runPromise(
+    pipe(
+      updateUserEmail("valid-id", "invalid-email"),
+      handleUpdateError,
+      Effect.tap((result) => Console.log("Result 3:", result))
+    )
+  );
+
+  // Database error
+  const result4 = await Effect.runPromise(
+    pipe(
+      updateUserEmail("db-error", "new-email@example.com"),
+      handleUpdateError,
+      Effect.tap((result) => Console.log("Result 4:", result))
+    )
+  );
+};
+
+// Call this to run the examples
+// runTypedErrorExamples().catch(console.error);
+
+export {
+  NotFoundError,
+  ValidationError,
+  DatabaseError,
+  findUser,
+  validateEmail,
+  updateUserEmail,
+  handleUpdateError,
+  runTypedErrorExamples,
+};
+#+end_src
+
+* Dependency Injection with Effect
+
+#+begin_src typescript :tangle ../tools/demo-projects/effect-demo/dependency-injection.ts
+import { Effect, Context, pipe, Console } from "effect";
+
+// 1. Define service interfaces
+interface Logger {
+  readonly log: (message: string) => Effect.Effect<void>;
+  readonly error: (message: string, error?: unknown) => Effect.Effect<void>;
+}
+
+interface UserRepository {
+  readonly findById: (id: string) => Effect.Effect<User | null>;
+  readonly save: (user: User) => Effect.Effect<User>;
+}
+
+interface EmailService {
+  readonly sendWelcomeEmail: (user: User) => Effect.Effect<void>;
+}
+
+// User model
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+// 2. Create Context tags for each service
+class LoggerService extends Context.Tag("LoggerService")<
+  LoggerService,
+  Logger
+>() {}
+
+class UserRepositoryService extends Context.Tag("UserRepositoryService")<
+  UserRepositoryService,
+  UserRepository
+>() {}
+
+class EmailServiceTag extends Context.Tag("EmailService")<
+  EmailServiceTag,
+  EmailService
+>() {}
+
+// 3. Create implementations
+
+// Console logger implementation
+const consoleLogger: Logger = {
+  log: (message) => Effect.sync(() => console.log(`[INFO] ${message}`)),
+  error: (message, error) =>
+    Effect.sync(() => {
+      console.error(`[ERROR] ${message}`);
+      if (error) console.error(error);
+    }),
+};
+
+// In-memory user repository implementation
+const createInMemoryUserRepository = (): UserRepository => {
+  const users = new Map<string, User>();
+
+  return {
+    findById: (id) =>
+      Effect.sync(() => {
+        const user = users.get(id);
+        return user || null;
+      }),
+    save: (user) =>
+      Effect.sync(() => {
+        users.set(user.id, user);
+        return user;
+      }),
+  };
+};
+
+// Email service implementation
+const createEmailService = (): EmailService => {
+  return {
+    sendWelcomeEmail: (user) =>
+      Effect.flatMap(LoggerService, (logger) =>
+        logger.log(`Sending welcome email to ${user.email}`)
+      ),
+  };
+};
+
+// 4. Create a service that depends on other services
+const createUserService = () => {
+  const registerUser = (
+    name: string,
+    email: string
+  ): Effect.Effect<User> => {
+    return pipe(
+      // Create a unique ID
+      Effect.sync(() => ({ id: `user-${Date.now()}`, name, email })),
+      // Save the user
+      Effect.flatMap((user) =>
+        pipe(
+          Effect.flatMap(UserRepositoryService, (repo) => repo.save(user)),
+          // Send welcome email
+          Effect.tap((savedUser) =>
+            Effect.flatMap(EmailServiceTag, (emailService) =>
+              emailService.sendWelcomeEmail(savedUser)
+            )
+          ),
+          // Log the success
+          Effect.tap((savedUser) =>
+            Effect.flatMap(LoggerService, (logger) =>
+              logger.log(`User registered: ${savedUser.id}`)
+            )
+          )
+        )
+      )
+    );
+  };
+
+  return { registerUser };
+};
+
+// 5. Run with provided dependencies
+const runDependencyInjectionExample = async () => {
+  const { registerUser } = createUserService();
+
+  // Create the effect with all dependencies
+  const program = pipe(
+    registerUser("John Doe", "john@example.com"),
+    Effect.provide(LoggerService.of(consoleLogger)),
+    Effect.provide(UserRepositoryService.of(createInMemoryUserRepository())),
+    Effect.provide(EmailServiceTag.of(createEmailService()))
+  );
+
+  // Run the program
+  const user = await Effect.runPromise(program);
+  console.log("Registered user:", user);
+};
+
+// Call this to run the example
+// runDependencyInjectionExample().catch(console.error);
+
+export {
+  Logger,
+  UserRepository,
+  EmailService,
+  LoggerService,
+  UserRepositoryService,
+  EmailServiceTag,
+  consoleLogger,
+  createInMemoryUserRepository,
+  createEmailService,
+  createUserService,
+  runDependencyInjectionExample,
+};
+#+end_src
+
+* Testing with Effect
+
+#+begin_src typescript :tangle ../tools/demo-projects/effect-demo/testing.ts
+import { Effect, pipe, Console, Context } from "effect";
+import {
+  LoggerService,
+  UserRepositoryService,
+  EmailServiceTag,
+  createUserService,
+} from "./dependency-injection";
+
+// Mock implementations for testing
+const testLogger = {
+  log: (message: string) => Effect.succeed(undefined),
+  error: (message: string, error?: unknown) => Effect.succeed(undefined),
+};
+
+const createTestUserRepository = (initialUsers: Record<string, any> = {}) => {
+  const users = new Map(Object.entries(initialUsers));
+  const saveLog: any[] = [];
+
+  return {
+    repository: {
+      findById: (id: string) =>
+        Effect.succeed(users.has(id) ? users.get(id) : null),
+      save: (user: any) =>
+        Effect.sync(() => {
+          users.set(user.id, user);
+          saveLog.push(user);
+          return user;
+        }),
+    },
+    // Test helpers
+    getSaveLog: () => [...saveLog],
+    getUsers: () => new Map(users),
+  };
+};
+
+const createTestEmailService = () => {
+  const sentEmails: any[] = [];
+
+  return {
+    service: {
+      sendWelcomeEmail: (user: any) =>
+        Effect.sync(() => {
+          sentEmails.push({ type: "welcome", user });
+        }),
+    },
+    // Test helpers
+    getSentEmails: () => [...sentEmails],
+  };
+};
+
+// Example test function
+const testUserRegistration = async () => {
+  // Set up test dependencies
+  const { repository: userRepo, getSaveLog } = createTestUserRepository();
+  const { service: emailService, getSentEmails } = createTestEmailService();
+
+  // Create the service to test
+  const { registerUser } = createUserService();
+
+  // Create a test environment with mock dependencies
+  const testEnvironment = pipe(
+    Effect.provide(LoggerService.of(testLogger)),
+    Effect.provide(UserRepositoryService.of(userRepo)),
+    Effect.provide(EmailServiceTag.of(emailService))
+  );
+
+  // Define the test case
+  const testCase = Effect.gen(function* (_) {
+    // Given a name and email
+    const name = "Test User";
+    const email = "test@example.com";
+
+    // When registering a user
+    const user = yield* _(registerUser(name, email));
+
+    // Then the user should be saved
+    const savedUsers = getSaveLog();
+    console.log("User was saved:", savedUsers.length === 1);
+    console.log("User has correct data:", user.name === name && user.email === email);
+
+    // And a welcome email should be sent
+    const sentEmails = getSentEmails();
+    console.log("Welcome email was sent:", sentEmails.length === 1);
+    console.log(
+      "Email sent to correct user:",
+      sentEmails[0]?.user?.id === user.id
+    );
+
+    return { user, savedUsers, sentEmails };
+  });
+
+  // Run the test with the test environment
+  const result = await Effect.runPromise(testEnvironment(testCase));
+  console.log("Test completed successfully");
+  return result;
+};
+
+// Call this to run the test
+// testUserRegistration().catch(console.error);
+
+export { testLogger, createTestUserRepository, createTestEmailService, testUserRegistration };
+#+end_src
+
+* Questions to Ask
+- How does Effect compare to similar libraries like fp-ts or io-ts?
+- What are the performance implications of using Effect vs traditional approaches?
+- How does Effect handle TypeScript 5.0+ features?
+- What are some good patterns for gradually adopting Effect in an existing codebase?
+- How do you deal with third-party libraries that don't return Effect types?
+
+* TODO Items [0/4]
+- [ ] Experiment with Effect's concurrency features
+- [ ] Set up a small project using Effect for error handling
+- [ ] Compare dependency injection with traditional approaches
+- [ ] Explore Effect's resource management capabilities

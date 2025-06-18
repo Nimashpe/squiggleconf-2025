@@ -1,0 +1,821 @@
+#+TITLE: Cross-Browser DevTools with WebExtensions
+#+DATE: <2025-09-18 Thu 11:30>
+#+PROPERTY: header-args:javascript :session *devtools-ext* :results output
+#+PROPERTY: header-args:mermaid :file ../diagrams/devtools-%%N.png
+
+* Session Information
+- *Speaker*: Oliver Dunk (Chrome Extensions @ Google, Editor @ W3C WebExtensions CG)
+- *Time*: Day 1, 11:30 AM
+- *Topics*: Browser Extensions, DevTools, Cross-browser Development
+
+* Pre-Session Research
+- [[https://developer.chrome.com/docs/extensions/mv3/devtools/][Chrome DevTools Extensions API]]
+- [[https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/devtools][Firefox DevTools Extensions API]]
+- [[https://github.com/w3c/webextensions][W3C WebExtensions Community Group]]
+- Current state of cross-browser extension APIs
+
+* WebExtension Evolution
+
+#+begin_src mermaid :file ../diagrams/devtools-webext-evolution.png
+timeline
+    title WebExtension API Evolution
+    section Early Days
+        2010 : Chrome Extensions v1
+        2013 : Chrome Extensions v2
+        2015 : Firefox WebExtensions (based on Chrome)
+    section Standardization
+        2018 : Edge adopts Chromium extensions
+        2019 : W3C WebExtensions Community Group forms
+        2021 : Chrome Manifest V3
+    section Next Generation
+        2023 : Firefox adopts Manifest V3 with key differences
+        2024 : Safari improves WebExtension support
+        2025 : WebExtensions API standardization efforts
+#+end_src
+
+* DevTools Extensions Architecture
+
+#+begin_src mermaid :file ../diagrams/devtools-architecture.png
+graph TB
+    subgraph "Browser Environment"
+        Browser[Browser]
+        DevTools[DevTools UI]
+        Extension[Extension Background]
+        Panel[DevTools Panel]
+        
+        Browser --> DevTools
+        Extension --> Panel
+        Extension <--> Browser
+        Panel <--> DevTools
+    end
+    
+    subgraph "Extension Components"
+        BG[Background Script]
+        CS[Content Script]
+        DP[DevTools Page]
+        UI[Panel UI]
+        
+        BG <--> DP
+        DP --> UI
+        BG <--> CS
+    end
+    
+    subgraph "Communication Flows"
+        DTAPI[DevTools API]
+        EXT[Extension API]
+        CDP[Chrome DevTools Protocol]
+        
+        DTAPI <--> DP
+        EXT <--> BG
+        CDP <--> DevTools
+    end
+    
+    style Panel fill:#f96,stroke:#333,stroke-width:2px
+    style DevTools fill:#9cf,stroke:#333,stroke-width:2px
+    style DTAPI fill:#f96,stroke:#333,stroke-width:2px
+#+end_src
+
+* Cross-Browser DevTools Extension Example
+
+Let's create a simple cross-browser DevTools extension that helps with network debugging.
+
+** 1. Manifest File (manifest.json)
+
+#+begin_src json :tangle ../tools/demo-projects/devtools-extension/manifest.json
+{
+  "name": "Network Insights DevTools",
+  "version": "1.0.0",
+  "description": "A cross-browser DevTools extension for network insights",
+  "manifest_version": 3,
+  "devtools_page": "devtools/devtools-page.html",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "network-insights@squiggleconf.example"
+    }
+  }
+}
+#+end_src
+
+** 2. DevTools Page (devtools/devtools-page.html)
+
+#+begin_src html :tangle ../tools/demo-projects/devtools-extension/devtools/devtools-page.html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="devtools-page.js"></script>
+</head>
+<body>
+  <!-- This page is an invisible DevTools page -->
+</body>
+</html>
+#+end_src
+
+** 3. DevTools Page Script (devtools/devtools-page.js)
+
+#+begin_src javascript :tangle ../tools/demo-projects/devtools-extension/devtools/devtools-page.js
+/**
+ * DevTools page script - registers the DevTools panel
+ * This script runs in the context of the DevTools
+ */
+
+// Create a connection to the background page
+const backgroundPageConnection = chrome.runtime.connect({
+  name: "devtools-page"
+});
+
+// Inform the background page when a new DevTools window is opened
+backgroundPageConnection.postMessage({
+  action: 'init',
+  tabId: chrome.devtools.inspectedWindow.tabId
+});
+
+// Create a DevTools panel
+chrome.devtools.panels.create(
+  "Network Insights",           // Panel title
+  "/icons/icon16.png",          // Panel icon
+  "/devtools/panel.html",       // Panel HTML page
+  (panel) => {
+    // Panel created callback
+    console.log("Network Insights panel created");
+    
+    // Listen for panel showing/hiding events
+    panel.onShown.addListener((panelWindow) => {
+      backgroundPageConnection.postMessage({
+        action: 'panel-shown',
+        tabId: chrome.devtools.inspectedWindow.tabId
+      });
+    });
+    
+    panel.onHidden.addListener(() => {
+      backgroundPageConnection.postMessage({
+        action: 'panel-hidden',
+        tabId: chrome.devtools.inspectedWindow.tabId
+      });
+    });
+  }
+);
+
+// Add a sidebar pane to the Network panel
+chrome.devtools.panels.network.createSidebarPane(
+  "Request Metrics",
+  (sidebar) => {
+    // Update sidebar content when shown
+    sidebar.onShown.addListener(() => {
+      sidebar.setObject({ message: "Select a request to see metrics" });
+    });
+    
+    // Respond to network request selection
+    chrome.devtools.network.onRequestFinished.addListener(
+      (request) => {
+        // Only update if the sidebar is visible
+        sidebar.setObject({
+          url: request.request.url,
+          method: request.request.method,
+          status: request.response.status,
+          statusText: request.response.statusText,
+          timing: request.time,
+          size: request.response.bodySize,
+          type: request.response.content.mimeType,
+          // Add more metrics as needed
+        });
+      }
+    );
+  }
+);
+#+end_src
+
+** 4. Panel HTML (devtools/panel.html)
+
+#+begin_src html :tangle ../tools/demo-projects/devtools-extension/devtools/panel.html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Network Insights</title>
+  <link rel="stylesheet" type="text/css" href="panel.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Network Insights</h1>
+      <div class="controls">
+        <button id="clear-btn">Clear Data</button>
+        <button id="export-btn">Export JSON</button>
+        <select id="filter-type">
+          <option value="all">All Requests</option>
+          <option value="xhr">XHR</option>
+          <option value="js">JavaScript</option>
+          <option value="css">CSS</option>
+          <option value="img">Images</option>
+          <option value="font">Fonts</option>
+        </select>
+      </div>
+    </header>
+    
+    <div class="metrics-overview">
+      <div class="metric-card">
+        <h3>Total Requests</h3>
+        <div id="total-requests" class="metric-value">0</div>
+      </div>
+      <div class="metric-card">
+        <h3>Total Size</h3>
+        <div id="total-size" class="metric-value">0 KB</div>
+      </div>
+      <div class="metric-card">
+        <h3>Average Load Time</h3>
+        <div id="avg-load-time" class="metric-value">0 ms</div>
+      </div>
+      <div class="metric-card">
+        <h3>Status Codes</h3>
+        <div id="status-codes" class="metric-value">-</div>
+      </div>
+    </div>
+    
+    <div class="chart-container">
+      <canvas id="size-chart"></canvas>
+    </div>
+    
+    <div class="requests-container">
+      <h2>Requests</h2>
+      <table id="requests-table">
+        <thead>
+          <tr>
+            <th>URL</th>
+            <th>Type</th>
+            <th>Method</th>
+            <th>Status</th>
+            <th>Size</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody id="requests-body">
+          <!-- Requests will be added here dynamically -->
+        </tbody>
+      </table>
+    </div>
+    
+    <div id="request-details" class="hidden">
+      <h2>Request Details</h2>
+      <div class="details-container">
+        <!-- Request details will be shown here -->
+      </div>
+    </div>
+  </div>
+  
+  <script src="panel.js"></script>
+</body>
+</html>
+#+end_src
+
+** 5. Panel JavaScript (devtools/panel.js)
+
+#+begin_src javascript :tangle ../tools/demo-projects/devtools-extension/devtools/panel.js
+/**
+ * DevTools panel script
+ * This runs in the context of the panel UI
+ */
+
+// Connect to the background page
+const port = chrome.runtime.connect({
+  name: "panel"
+});
+
+// Tell the background page that panel is open
+port.postMessage({
+  action: "panel-init",
+  tabId: chrome.devtools.inspectedWindow.tabId
+});
+
+// Track all requests
+let allRequests = [];
+let requestsById = {};
+
+// DOM elements
+const totalRequestsEl = document.getElementById('total-requests');
+const totalSizeEl = document.getElementById('total-size');
+const avgLoadTimeEl = document.getElementById('avg-load-time');
+const statusCodesEl = document.getElementById('status-codes');
+const requestsTableEl = document.getElementById('requests-body');
+const requestDetailsEl = document.getElementById('request-details');
+const filterTypeEl = document.getElementById('filter-type');
+const clearBtnEl = document.getElementById('clear-btn');
+const exportBtnEl = document.getElementById('export-btn');
+
+// Initialize the panel
+function initPanel() {
+  // Listen for messages from the background page
+  port.onMessage.addListener((message) => {
+    if (message.action === 'network-request') {
+      addRequest(message.request);
+    }
+  });
+  
+  // Set up event listeners
+  filterTypeEl.addEventListener('change', updateRequestsTable);
+  clearBtnEl.addEventListener('click', clearData);
+  exportBtnEl.addEventListener('click', exportData);
+  
+  // Ask for any existing data
+  port.postMessage({
+    action: "get-existing-data",
+    tabId: chrome.devtools.inspectedWindow.tabId
+  });
+}
+
+// Add a request to the UI
+function addRequest(request) {
+  // Add to our data stores
+  allRequests.push(request);
+  requestsById[request.id] = request;
+  
+  // Update the metrics
+  updateMetrics();
+  
+  // Update the table (respecting filters)
+  updateRequestsTable();
+}
+
+// Update the metrics display
+function updateMetrics() {
+  // Total requests
+  totalRequestsEl.textContent = allRequests.length;
+  
+  // Total size
+  const totalSize = allRequests.reduce((sum, req) => sum + (req.size || 0), 0);
+  totalSizeEl.textContent = formatSize(totalSize);
+  
+  // Average load time
+  const totalTime = allRequests.reduce((sum, req) => sum + (req.time || 0), 0);
+  const avgTime = allRequests.length ? (totalTime / allRequests.length).toFixed(2) : 0;
+  avgLoadTimeEl.textContent = `${avgTime} ms`;
+  
+  // Status codes distribution
+  const statusCodes = {};
+  allRequests.forEach(req => {
+    const status = req.status || 0;
+    statusCodes[status] = (statusCodes[status] || 0) + 1;
+  });
+  
+  let statusText = '';
+  Object.entries(statusCodes).sort().forEach(([code, count]) => {
+    statusText += `${code}: ${count} `;
+  });
+  statusCodesEl.textContent = statusText || '-';
+  
+  // If we had a chart, we'd update it here
+  // updateChart();
+}
+
+// Update the requests table based on current filter
+function updateRequestsTable() {
+  const filterType = filterTypeEl.value;
+  
+  // Clear the table
+  requestsTableEl.innerHTML = '';
+  
+  // Filter requests if needed
+  let filteredRequests = allRequests;
+  if (filterType !== 'all') {
+    filteredRequests = allRequests.filter(req => req.type === filterType);
+  }
+  
+  // Add rows for filtered requests
+  filteredRequests.forEach(request => {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td title="${request.url}">${truncateUrl(request.url)}</td>
+      <td>${request.type || 'unknown'}</td>
+      <td>${request.method}</td>
+      <td>${request.status}</td>
+      <td>${formatSize(request.size)}</td>
+      <td>${request.time.toFixed(2)} ms</td>
+    `;
+    
+    // Set up click handler to show details
+    row.addEventListener('click', () => showRequestDetails(request.id));
+    
+    // Add the row
+    requestsTableEl.appendChild(row);
+  });
+}
+
+// Show details for a specific request
+function showRequestDetails(requestId) {
+  const request = requestsById[requestId];
+  if (!request) return;
+  
+  requestDetailsEl.classList.remove('hidden');
+  
+  // Get the details container
+  const detailsContainer = requestDetailsEl.querySelector('.details-container');
+  
+  // Fill it with request details
+  detailsContainer.innerHTML = `
+    <div class="detail-group">
+      <h3>General</h3>
+      <div class="detail-item">
+        <span class="detail-label">URL:</span>
+        <span class="detail-value">${request.url}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Method:</span>
+        <span class="detail-value">${request.method}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Status:</span>
+        <span class="detail-value">${request.status} ${request.statusText || ''}</span>
+      </div>
+    </div>
+    
+    <div class="detail-group">
+      <h3>Timing</h3>
+      <div class="detail-item">
+        <span class="detail-label">Total Time:</span>
+        <span class="detail-value">${request.time.toFixed(2)} ms</span>
+      </div>
+      <!-- We would add more timing details here in a real extension -->
+    </div>
+    
+    <div class="detail-group">
+      <h3>Headers</h3>
+      <div class="headers-container">
+        ${formatHeaders(request.requestHeaders, 'Request Headers')}
+        ${formatHeaders(request.responseHeaders, 'Response Headers')}
+      </div>
+    </div>
+  `;
+}
+
+// Format headers for display
+function formatHeaders(headers, title) {
+  if (!headers || headers.length === 0) {
+    return `<div class="headers-section">
+      <h4>${title}</h4>
+      <p>No headers available</p>
+    </div>`;
+  }
+  
+  let html = `<div class="headers-section">
+    <h4>${title}</h4>
+    <div class="headers-list">`;
+    
+  headers.forEach(header => {
+    html += `<div class="header-item">
+      <span class="header-name">${header.name}:</span>
+      <span class="header-value">${header.value}</span>
+    </div>`;
+  });
+  
+  html += `</div></div>`;
+  return html;
+}
+
+// Clear all data
+function clearData() {
+  allRequests = [];
+  requestsById = {};
+  
+  // Update UI
+  updateMetrics();
+  updateRequestsTable();
+  requestDetailsEl.classList.add('hidden');
+  
+  // Tell background page to clear data
+  port.postMessage({
+    action: "clear-data",
+    tabId: chrome.devtools.inspectedWindow.tabId
+  });
+}
+
+// Export data as JSON
+function exportData() {
+  const dataStr = JSON.stringify(allRequests, null, 2);
+  const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+  
+  const exportFileDefaultName = `network-insights-export-${new Date().toISOString()}.json`;
+  
+  const linkElement = document.createElement('a');
+  linkElement.setAttribute('href', dataUri);
+  linkElement.setAttribute('download', exportFileDefaultName);
+  linkElement.click();
+}
+
+// Helper: Format byte size to human-readable
+function formatSize(bytes) {
+  if (bytes === 0 || bytes === undefined) return '0 B';
+  
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  
+  return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${units[i]}`;
+}
+
+// Helper: Truncate URL for display
+function truncateUrl(url) {
+  const maxLength = 50;
+  if (url.length <= maxLength) return url;
+  
+  try {
+    const urlObj = new URL(url);
+    const domain = urlObj.hostname;
+    const path = urlObj.pathname;
+    
+    if (domain.length + 3 >= maxLength) {
+      return domain.substring(0, maxLength - 3) + '...';
+    }
+    
+    const availableChars = maxLength - domain.length - 3;
+    const truncatedPath = path.length > availableChars
+      ? path.substring(0, availableChars) + '...'
+      : path;
+      
+    return domain + truncatedPath;
+  } catch (e) {
+    // Fallback for invalid URLs
+    return url.substring(0, maxLength - 3) + '...';
+  }
+}
+
+// Initialize the panel
+initPanel();
+#+end_src
+
+** 6. Background Script (background.js)
+
+#+begin_src javascript :tangle ../tools/demo-projects/devtools-extension/background.js
+/**
+ * Background script for the Network Insights extension
+ * This manages network data and communication between DevTools and content
+ */
+
+// Keep track of connections and tabs
+const connections = {};
+const tabData = {};
+
+// Handle connections from devtools or panel pages
+chrome.runtime.onConnect.addListener(port => {
+  const portName = port.name;
+  
+  if (portName === 'devtools-page') {
+    // Handle initial setup message from devtools
+    port.onMessage.addListener((message, sender) => {
+      if (message.action === 'init') {
+        const tabId = message.tabId;
+        
+        // Keep track of connection for this tab
+        connections[tabId] = port;
+        
+        // Initialize data for this tab if needed
+        if (!tabData[tabId]) {
+          tabData[tabId] = {
+            requests: [],
+            nextRequestId: 1,
+            isCapturing: true
+          };
+        }
+        
+        // Clean up when port disconnects
+        port.onDisconnect.addListener(() => {
+          delete connections[tabId];
+        });
+      } else if (message.action === 'panel-shown') {
+        const tabId = message.tabId;
+        if (tabData[tabId]) {
+          tabData[tabId].isCapturing = true;
+        }
+      } else if (message.action === 'panel-hidden') {
+        const tabId = message.tabId;
+        if (tabData[tabId]) {
+          tabData[tabId].isCapturing = false;
+        }
+      }
+    });
+  } else if (portName === 'panel') {
+    // Handle messages from panel UI
+    port.onMessage.addListener((message, sender) => {
+      if (message.action === 'get-existing-data') {
+        const tabId = message.tabId;
+        if (tabData[tabId] && tabData[tabId].requests) {
+          // Send existing requests to the panel
+          tabData[tabId].requests.forEach(request => {
+            port.postMessage({
+              action: 'network-request',
+              request
+            });
+          });
+        }
+      } else if (message.action === 'clear-data') {
+        const tabId = message.tabId;
+        if (tabData[tabId]) {
+          tabData[tabId].requests = [];
+          tabData[tabId].nextRequestId = 1;
+        }
+      }
+    });
+    
+    // Clean up when panel disconnects
+    port.onDisconnect.addListener(() => {
+      // No specific cleanup needed here
+    });
+  }
+});
+
+// Listen for web requests
+chrome.webRequest.onCompleted.addListener(
+  details => {
+    const tabId = details.tabId;
+    
+    // Skip if it's not associated with a tab or we're not tracking this tab
+    if (tabId < 0 || !tabData[tabId] || !tabData[tabId].isCapturing) {
+      return;
+    }
+    
+    // Process request
+    processRequest(tabId, details);
+  },
+  { urls: ["<all_urls>"] }
+);
+
+// Process and store information about a completed request
+function processRequest(tabId, details) {
+  const url = details.url;
+  const method = details.method;
+  const type = getRequestType(details.type, url);
+  const status = details.statusCode;
+  const size = details.responseSize || 0;
+  const time = details.timeStamp - details.timeStamp; // This would be calculated properly in a real extension
+  
+  // Create request object
+  const request = {
+    id: tabData[tabId].nextRequestId++,
+    url,
+    method,
+    type,
+    status,
+    statusText: getStatusText(status),
+    size,
+    time,
+    timeStamp: details.timeStamp,
+    requestHeaders: [], // Would be populated in a real extension
+    responseHeaders: [] // Would be populated in a real extension
+  };
+  
+  // Store the request
+  tabData[tabId].requests.push(request);
+  
+  // Send to devtools if connected
+  if (connections[tabId]) {
+    connections[tabId].postMessage({
+      action: 'network-request',
+      request
+    });
+  }
+}
+
+// Helper: Determine the request type based on content type and URL
+function getRequestType(webRequestType, url) {
+  // Map webRequest types to our own categories
+  switch (webRequestType) {
+    case 'xmlhttprequest':
+      return 'xhr';
+    case 'script':
+      return 'js';
+    case 'stylesheet':
+      return 'css';
+    case 'image':
+      return 'img';
+    case 'font':
+      return 'font';
+    case 'main_frame':
+      return 'html';
+    case 'sub_frame':
+      return 'iframe';
+    default:
+      // Try to determine type from URL extension
+      const extension = url.split('.').pop().split('?')[0].toLowerCase();
+      switch (extension) {
+        case 'js':
+          return 'js';
+        case 'css':
+          return 'css';
+        case 'png':
+        case 'jpg':
+        case 'jpeg':
+        case 'gif':
+        case 'webp':
+        case 'svg':
+          return 'img';
+        case 'woff':
+        case 'woff2':
+        case 'ttf':
+        case 'otf':
+        case 'eot':
+          return 'font';
+        case 'html':
+        case 'htm':
+          return 'html';
+        case 'json':
+          return 'xhr';
+        default:
+          return 'other';
+      }
+  }
+}
+
+// Helper: Get HTTP status text
+function getStatusText(status) {
+  const statusTexts = {
+    200: 'OK',
+    201: 'Created',
+    204: 'No Content',
+    301: 'Moved Permanently',
+    302: 'Found',
+    304: 'Not Modified',
+    400: 'Bad Request',
+    401: 'Unauthorized',
+    403: 'Forbidden',
+    404: 'Not Found',
+    500: 'Internal Server Error',
+    502: 'Bad Gateway',
+    503: 'Service Unavailable'
+  };
+  
+  return statusTexts[status] || '';
+}
+#+end_src
+
+* Cross-Browser Challenges and Solutions
+
+#+begin_src mermaid :file ../diagrams/devtools-cross-browser.png
+graph TB
+    A[Cross-Browser Challenges] --> B[API Differences]
+    A --> C[Manifest Differences]
+    A --> D[Security Models]
+    A --> E[DevTools Features]
+    
+    B --> B1[Feature Detection]
+    B --> B2[Compatibility Wrappers]
+    
+    C --> C1[Browser-specific Manifests]
+    C --> C2[Polyfills]
+    
+    D --> D1[Permission Handling]
+    D --> D2[Content Security Policy]
+    
+    E --> E1[Progressive Enhancement]
+    E --> E2[Feature Flags]
+    
+    style A fill:#f96,stroke:#333,stroke-width:4px
+#+end_src
+
+* Future of Web Extension APIs
+
+#+begin_src mermaid :file ../diagrams/devtools-future-apis.png
+mindmap
+  root((Future of WebExtensions))
+    Standardization
+      W3C WebExtensions CG
+      Common API surface
+      Unified security model
+    New APIs
+      Tab Groups
+      Advanced Networking
+      Enhanced DevTools
+      Side Panel API
+    Privacy & Security
+      MV3 improvements
+      Permission rationalization
+      Limited host permissions
+    Distribution
+      Cross-browser stores
+      Web Store compatibility
+      Enterprise deployment
+#+end_src
+
+* Questions to Ask
+- What are the current biggest challenges in cross-browser extension development?
+- How is the W3C WebExtensions Community Group approaching API standardization?
+- What are the key differences between browser DevTools extension APIs?
+- How can extension developers provide good fallbacks for browsers with less capabilities?
+- What's the future roadmap for unified WebExtension APIs?
+
+* TODO Items [0/3]
+- [ ] Set up basic DevTools extension scaffolding
+- [ ] Test extension compatibility across browsers
+- [ ] Explore the Chrome DevTools Protocol (CDP) for advanced features

@@ -1,0 +1,657 @@
+#+TITLE: The Lockfiles PhD You Never Got
+#+DATE: <2025-09-18 Thu 14:00>
+#+PROPERTY: header-args:javascript :session *lockfiles* :results output
+#+PROPERTY: header-args:mermaid :file ../diagrams/lockfiles-%%N.png
+
+* Session Information
+- *Speaker*: Pete Gonzalez (Co-creator of Lockfile Explorer, engineer at TikTok)
+- *Time*: Day 1, 2:00 PM
+- *Topics*: Package Management, Dependency Resolution, JavaScript Ecosystem
+
+* Pre-Session Research
+- [[https://docs.npmjs.com/cli/v10/configuring-npm/package-lock-json][npm package-lock.json documentation]]
+- [[https://yarnpkg.com/configuration/yarnrc][Yarn lockfile documentation]]
+- [[https://pnpm-lock-explorer.pages.dev/][Lockfile Explorer tool]]
+- Differences between npm, yarn, and pnpm lockfiles
+
+* Evolution of Package Managers
+
+#+begin_src mermaid :file ../diagrams/lockfiles-evolution.png
+timeline
+    title JavaScript Package Manager Evolution
+    section Early Days
+        2010 : npm : First JavaScript package manager
+        2012 : bower : Front-end package manager
+    section Modern Era
+        2016 : Yarn : Introduced lockfiles and offline cache
+        2017 : npm v5 : Added package-lock.json
+        2017 : pnpm : Content-addressable storage
+    section Next Generation
+        2020 : Yarn v2 (Berry) : Zero-installs, PnP
+        2022 : npm v8 : Workspaces support
+        2023 : pnpm v8 : Improved monorepo support
+        2024 : Package-lock v3 : Enhanced security features
+#+end_src
+
+** Package Manager Comparison
+
+#+begin_src mermaid :file ../diagrams/lockfiles-comparison.png
+graph TB
+    subgraph "npm"
+        npm1[package-lock.json]
+        npm2[node_modules flat/nested]
+        npm3[package.json]
+        npm4[GitHub registry support]
+    end
+    
+    subgraph "Yarn Classic"
+        yarn1[yarn.lock]
+        yarn2[node_modules flat/nested]
+        yarn3[package.json]
+        yarn4[Offline mirror]
+    end
+    
+    subgraph "Yarn Modern (Berry)"
+        berry1[yarn.lock]
+        berry2[PnP or node_modules]
+        berry3[package.json]
+        berry4[Zero-installs]
+        berry5[Plug'n'Play]
+    end
+    
+    subgraph "pnpm"
+        pnpm1[pnpm-lock.yaml]
+        pnpm2[Content-addressable store]
+        pnpm3[Symlinks to store]
+        pnpm4[Strict dependencies]
+    end
+    
+    style npm1 fill:#f96,stroke:#333,stroke-width:2px
+    style yarn1 fill:#f96,stroke:#333,stroke-width:2px
+    style berry1 fill:#f96,stroke:#333,stroke-width:2px
+    style pnpm1 fill:#f96,stroke:#333,stroke-width:2px
+#+end_src
+
+* Anatomy of Lockfiles
+
+** npm package-lock.json
+
+#+begin_src json :tangle ../tools/demo-projects/lockfiles-demo/npm-example/package-lock.json
+{
+  "name": "npm-lockfile-example",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "npm-lockfile-example",
+      "version": "1.0.0",
+      "dependencies": {
+        "express": "^4.18.2",
+        "lodash": "^4.17.21"
+      }
+    },
+    "node_modules/accepts": {
+      "version": "1.3.8",
+      "resolved": "https://registry.npmjs.org/accepts/-/accepts-1.3.8.tgz",
+      "integrity": "sha512-PYAthTa2m2VKxuvSD3DPC/Gy+U+sOA1LAuT8mkmRuvw+NACSaeXEQ+NHcVF7rONl6qcaxV3Uuemwawk+7+SJLw==",
+      "dependencies": {
+        "mime-types": "~2.1.34",
+        "negotiator": "0.6.3"
+      },
+      "engines": {
+        "node": ">= 0.6"
+      }
+    },
+    "node_modules/array-flatten": {
+      "version": "1.1.1",
+      "resolved": "https://registry.npmjs.org/array-flatten/-/array-flatten-1.1.1.tgz",
+      "integrity": "sha512-PCVAQswWemu6UdxsDFFX/+gVeYqKAod3D3UVm91jHwynguOwAvYPhx8nNlM++NqRcK6CxxpUafjmhIdKiHibqg=="
+    },
+    "node_modules/express": {
+      "version": "4.18.2",
+      "resolved": "https://registry.npmjs.org/express/-/express-4.18.2.tgz",
+      "integrity": "sha512-5/PsL6iGPdfQ/lKM1UuielYgv3BUoJfz1aUwU9vHZ+J7gyvwdQXFEBIEIaxeGf0GIcreATNyBExtalisDbuMqQ==",
+      "dependencies": {
+        "accepts": "~1.3.8",
+        "array-flatten": "1.1.1",
+        "body-parser": "1.20.1",
+        "content-disposition": "0.5.4",
+        "content-type": "~1.0.4",
+        "cookie": "0.5.0",
+        "cookie-signature": "1.0.6",
+        "debug": "2.6.9",
+        "depd": "2.0.0",
+        "encodeurl": "~1.0.2",
+        "escape-html": "~1.0.3",
+        "etag": "~1.8.1",
+        "finalhandler": "1.2.0",
+        "fresh": "0.5.2",
+        "http-errors": "2.0.0",
+        "merge-descriptors": "1.0.1",
+        "methods": "~1.1.2",
+        "on-finished": "2.4.1",
+        "parseurl": "~1.3.3",
+        "path-to-regexp": "0.1.7",
+        "proxy-addr": "~2.0.7",
+        "qs": "6.11.0",
+        "range-parser": "~1.2.1",
+        "safe-buffer": "5.2.1",
+        "send": "0.18.0",
+        "serve-static": "1.15.0",
+        "setprototypeof": "1.2.0",
+        "statuses": "2.0.1",
+        "type-is": "~1.6.18",
+        "utils-merge": "1.0.1",
+        "vary": "~1.1.2"
+      },
+      "engines": {
+        "node": ">= 0.10.0"
+      }
+    },
+    "node_modules/lodash": {
+      "version": "4.17.21",
+      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+      "integrity": "sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg=="
+    }
+  }
+}
+#+end_src
+
+** Yarn lockfile
+
+#+begin_src yaml :tangle ../tools/demo-projects/lockfiles-demo/yarn-example/yarn.lock
+# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.
+# yarn lockfile v1
+
+accepts@~1.3.8:
+  version "1.3.8"
+  resolved "https://registry.yarnpkg.com/accepts/-/accepts-1.3.8.tgz#0bf0be125b67014adcb0b0921e62db7bffe16b2e"
+  integrity sha512-PYAthTa2m2VKxuvSD3DPC/Gy+U+sOA1LAuT8mkmRuvw+NACSaeXEQ+NHcVF7rONl6qcaxV3Uuemwawk+7+SJLw==
+  dependencies:
+    mime-types "~2.1.34"
+    negotiator "0.6.3"
+
+array-flatten@1.1.1:
+  version "1.1.1"
+  resolved "https://registry.yarnpkg.com/array-flatten/-/array-flatten-1.1.1.tgz#9a5f699051b1e7073328f2a008968b64ea2955d2"
+  integrity sha512-PCVAQswWemu6UdxsDFFX/+gVeYqKAod3D3UVm91jHwynguOwAvYPhx8nNlM++NqRcK6CxxpUafjmhIdKiHibqg==
+
+express@^4.18.2:
+  version "4.18.2"
+  resolved "https://registry.yarnpkg.com/express/-/express-4.18.2.tgz#3fabe08296e930c796c19e3c516979386ba9fd59"
+  integrity sha512-5/PsL6iGPdfQ/lKM1UuielYgv3BUoJfz1aUwU9vHZ+J7gyvwdQXFEBIEIaxeGf0GIcreATNyBExtalisDbuMqQ==
+  dependencies:
+    accepts "~1.3.8"
+    array-flatten "1.1.1"
+    body-parser "1.20.1"
+    content-disposition "0.5.4"
+    content-type "~1.0.4"
+    cookie "0.5.0"
+    cookie-signature "1.0.6"
+    debug "2.6.9"
+    depd "2.0.0"
+    encodeurl "~1.0.2"
+    escape-html "~1.0.3"
+    etag "~1.8.1"
+    finalhandler "1.2.0"
+    fresh "0.5.2"
+    http-errors "2.0.0"
+    merge-descriptors "1.0.1"
+    methods "~1.1.2"
+    on-finished "2.4.1"
+    parseurl "~1.3.3"
+    path-to-regexp "0.1.7"
+    proxy-addr "~2.0.7"
+    qs "6.11.0"
+    range-parser "~1.2.1"
+    safe-buffer "5.2.1"
+    send "0.18.0"
+    serve-static "1.15.0"
+    setprototypeof "1.2.0"
+    statuses "2.0.1"
+    type-is "~1.6.18"
+    utils-merge "1.0.1"
+    vary "~1.1.2"
+
+lodash@^4.17.21:
+  version "4.17.21"
+  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz#679591c564c3bffaae8454cf0b3df370c3d6911c"
+  integrity sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg==
+#+end_src
+
+** pnpm lockfile
+
+#+begin_src yaml :tangle ../tools/demo-projects/lockfiles-demo/pnpm-example/pnpm-lock.yaml
+lockfileVersion: '6.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+dependencies:
+  express:
+    specifier: ^4.18.2
+    version: 4.18.2
+  lodash:
+    specifier: ^4.17.21
+    version: 4.17.21
+
+packages:
+
+  /accepts@1.3.8:
+    resolution: {integrity: sha512-PYAthTa2m2VKxuvSD3DPC/Gy+U+sOA1LAuT8mkmRuvw+NACSaeXEQ+NHcVF7rONl6qcaxV3Uuemwawk+7+SJLw==, tarball: https://registry.npmjs.org/accepts/-/accepts-1.3.8.tgz}
+    engines: {node: '>= 0.6'}
+    dependencies:
+      mime-types: 2.1.35
+      negotiator: 0.6.3
+    dev: false
+
+  /array-flatten@1.1.1:
+    resolution: {integrity: sha512-PCVAQswWemu6UdxsDFFX/+gVeYqKAod3D3UVm91jHwynguOwAvYPhx8nNlM++NqRcK6CxxpUafjmhIdKiHibqg==, tarball: https://registry.npmjs.org/array-flatten/-/array-flatten-1.1.1.tgz}
+    dev: false
+
+  /express@4.18.2:
+    resolution: {integrity: sha512-5/PsL6iGPdfQ/lKM1UuielYgv3BUoJfz1aUwU9vHZ+J7gyvwdQXFEBIEIaxeGf0GIcreATNyBExtalisDbuMqQ==, tarball: https://registry.npmjs.org/express/-/express-4.18.2.tgz}
+    engines: {node: '>= 0.10.0'}
+    dependencies:
+      accepts: 1.3.8
+      array-flatten: 1.1.1
+      body-parser: 1.20.1
+      content-disposition: 0.5.4
+      content-type: 1.0.5
+      cookie: 0.5.0
+      cookie-signature: 1.0.6
+      debug: 2.6.9
+      depd: 2.0.0
+      encodeurl: 1.0.2
+      escape-html: 1.0.3
+      etag: 1.8.1
+      finalhandler: 1.2.0
+      fresh: 0.5.2
+      http-errors: 2.0.0
+      merge-descriptors: 1.0.1
+      methods: 1.1.2
+      on-finished: 2.4.1
+      parseurl: 1.3.3
+      path-to-regexp: 0.1.7
+      proxy-addr: 2.0.7
+      qs: 6.11.0
+      range-parser: 1.2.1
+      safe-buffer: 5.2.1
+      send: 0.18.0
+      serve-static: 1.15.0
+      setprototypeof: 1.2.0
+      statuses: 2.0.1
+      type-is: 1.6.18
+      utils-merge: 1.0.1
+      vary: 1.1.2
+    dev: false
+
+  /lodash@4.17.21:
+    resolution: {integrity: sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg==, tarball: https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz}
+    dev: false
+#+end_src
+
+* Understanding Dependency Resolution
+
+#+begin_src mermaid :file ../diagrams/lockfiles-dependency-resolution.png
+graph TD
+    A[package.json] --> B{Has lockfile?}
+    B -->|Yes| C[Use locked versions]
+    B -->|No| D[Resolve dependencies]
+    
+    D --> E[Compute version ranges]
+    E --> F[Resolve conflicts]
+    F --> G[Create dependency graph]
+    G --> H[Generate lockfile]
+    H --> I[Install packages]
+    
+    C --> I
+    
+    subgraph "Conflict Resolution"
+        F1[Dependency A requires B@1.x]
+        F2[Dependency C requires B@2.x]
+        F3[Find compatible version or hoist/duplicate]
+    end
+    
+    style A fill:#f96,stroke:#333,stroke-width:2px
+    style H fill:#f96,stroke:#333,stroke-width:2px
+#+end_src
+
+* Common Lockfile Issues and Solutions
+
+** Analyzing a Dependency Tree
+
+#+begin_src javascript :tangle ../tools/demo-projects/lockfiles-demo/analyze-dependencies.js
+#!/usr/bin/env node
+
+/**
+ * A simple dependency tree analyzer for npm/yarn projects
+ * This script helps identify common issues in dependency trees
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+// Utility to parse lockfiles
+function parseLockfile(projectPath) {
+  const npmLockPath = path.join(projectPath, 'package-lock.json');
+  const yarnLockPath = path.join(projectPath, 'yarn.lock');
+  const pnpmLockPath = path.join(projectPath, 'pnpm-lock.yaml');
+  
+  if (fs.existsSync(npmLockPath)) {
+    console.log('Found npm lockfile');
+    return {
+      type: 'npm',
+      content: JSON.parse(fs.readFileSync(npmLockPath, 'utf8'))
+    };
+  } else if (fs.existsSync(yarnLockPath)) {
+    console.log('Found yarn lockfile');
+    // Simple yarn lockfile parser (not complete)
+    const content = fs.readFileSync(yarnLockPath, 'utf8');
+    const dependencies = {};
+    
+    // Very basic parsing of yarn.lock
+    const depRegex = /^"?([^@\s"]+)(?:@[^\s"]+)?"?(?:@([^:]+))?\s*:\s*$/gm;
+    const versionRegex = /^\s{2}version\s+"([^"]+)"/gm;
+    
+    let match;
+    let currentDep = null;
+    
+    // First pass to extract dependencies
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Check for dependency declaration
+      const depMatch = depRegex.exec(line);
+      if (depMatch) {
+        currentDep = depMatch[1];
+        dependencies[currentDep] = { versions: [] };
+        continue;
+      }
+      
+      // Check for version
+      if (currentDep && line.includes('version')) {
+        const versionMatch = /version\s+"([^"]+)"/.exec(line);
+        if (versionMatch) {
+          dependencies[currentDep].versions.push(versionMatch[1]);
+        }
+      }
+    }
+    
+    return {
+      type: 'yarn',
+      content: dependencies
+    };
+  } else if (fs.existsSync(pnpmLockPath)) {
+    console.log('Found pnpm lockfile');
+    // Basic pnpm lockfile analysis (not complete)
+    return {
+      type: 'pnpm',
+      content: 'PNPM lockfile analysis not implemented'
+    };
+  } else {
+    console.log('No lockfile found');
+    return null;
+  }
+}
+
+// Find duplicate dependencies
+function findDuplicates(lockfile) {
+  if (!lockfile) return [];
+  
+  const duplicates = [];
+  
+  if (lockfile.type === 'npm') {
+    const packages = lockfile.content.packages || {};
+    const deps = {};
+    
+    // Collect all packages by name and version
+    Object.keys(packages).forEach(pkgPath => {
+      if (pkgPath === '') return; // Skip root package
+      
+      const pkg = packages[pkgPath];
+      if (!pkg.name || !pkg.version) return;
+      
+      if (!deps[pkg.name]) {
+        deps[pkg.name] = [];
+      }
+      
+      deps[pkg.name].push({
+        version: pkg.version,
+        path: pkgPath
+      });
+    });
+    
+    // Find packages with multiple versions
+    Object.keys(deps).forEach(name => {
+      const versions = deps[name];
+      if (versions.length > 1) {
+        const uniqueVersions = new Set(versions.map(v => v.version));
+        if (uniqueVersions.size > 1) {
+          duplicates.push({
+            name,
+            versions: versions.map(v => ({
+              version: v.version,
+              path: v.path
+            }))
+          });
+        }
+      }
+    });
+  } else if (lockfile.type === 'yarn') {
+    const deps = lockfile.content;
+    
+    Object.keys(deps).forEach(name => {
+      const versions = deps[name].versions;
+      if (versions.length > 1) {
+        duplicates.push({
+          name,
+          versions: versions.map(version => ({
+            version,
+            path: null // Yarn lockfile doesn't store paths
+          }))
+        });
+      }
+    });
+  }
+  
+  return duplicates;
+}
+
+// Check for outdated dependencies
+function checkOutdated(projectPath) {
+  try {
+    // This is a placeholder - in a real implementation we would
+    // query the registry for latest versions
+    console.log('Checking for outdated dependencies (simulated)');
+    
+    // Sample data - in a real tool, this would come from npm registry
+    return [
+      { name: 'express', current: '4.18.2', latest: '4.18.2', status: 'current' },
+      { name: 'lodash', current: '4.17.21', latest: '4.17.21', status: 'current' }
+    ];
+  } catch (error) {
+    console.error('Error checking outdated packages:', error);
+    return [];
+  }
+}
+
+// Check for security vulnerabilities
+function checkVulnerabilities(projectPath) {
+  // This is a placeholder - in a real implementation we would
+  // query a vulnerability database
+  console.log('Checking for vulnerabilities (simulated)');
+  
+  // Sample data - in a real tool, this would come from security advisories
+  return [
+    {
+      name: 'example-vulnerable-pkg',
+      version: '1.0.0',
+      severity: 'high',
+      description: 'This is a simulated vulnerability',
+      recommendation: 'Upgrade to version 1.1.0 or later'
+    }
+  ];
+}
+
+// Main function to analyze a project
+function analyzeProject(projectPath) {
+  console.log(`Analyzing project at ${projectPath}`);
+  
+  // Parse lockfile
+  const lockfile = parseLockfile(projectPath);
+  if (!lockfile) {
+    console.log('No lockfile found. Run npm install or yarn to generate a lockfile.');
+    return;
+  }
+  
+  // Find duplicates
+  const duplicates = findDuplicates(lockfile);
+  console.log('\nDuplicate Dependencies:');
+  if (duplicates.length === 0) {
+    console.log('No duplicates found');
+  } else {
+    duplicates.forEach(dup => {
+      console.log(`- ${dup.name}:`);
+      dup.versions.forEach(v => {
+        console.log(`  - ${v.version}${v.path ? ` (${v.path})` : ''}`);
+      });
+    });
+  }
+  
+  // Check for outdated dependencies
+  const outdated = checkOutdated(projectPath);
+  console.log('\nOutdated Dependencies:');
+  if (outdated.length === 0) {
+    console.log('All dependencies are up to date');
+  } else {
+    outdated.forEach(dep => {
+      if (dep.status !== 'current') {
+        console.log(`- ${dep.name}: ${dep.current} → ${dep.latest}`);
+      }
+    });
+  }
+  
+  // Check for vulnerabilities
+  const vulnerabilities = checkVulnerabilities(projectPath);
+  console.log('\nVulnerabilities:');
+  if (vulnerabilities.length === 0) {
+    console.log('No vulnerabilities found');
+  } else {
+    vulnerabilities.forEach(vuln => {
+      console.log(`- ${vuln.name}@${vuln.version}: ${vuln.severity}`);
+      console.log(`  ${vuln.description}`);
+      console.log(`  Recommendation: ${vuln.recommendation}`);
+    });
+  }
+}
+
+// Run if called directly
+if (require.main === module) {
+  const projectPath = process.argv[2] || '.';
+  analyzeProject(path.resolve(projectPath));
+}
+
+module.exports = {
+  parseLockfile,
+  findDuplicates,
+  checkOutdated,
+  checkVulnerabilities,
+  analyzeProject
+};
+#+end_src
+
+* Best Practices for Managing Dependencies
+
+#+begin_src mermaid :file ../diagrams/lockfiles-best-practices.png
+mindmap
+  root((Dependency Management Best Practices))
+    Version control lockfiles
+      Always commit to git
+      Review changes carefully
+      Understand implications of updates
+    Use semantic versioning
+      Major: Breaking changes (^)
+      Minor: New features (~)
+      Patch: Bug fixes
+    Audit regularly
+      Security vulnerabilities
+      Outdated dependencies
+      Unused dependencies
+    Monorepo strategies
+      Consistent versions
+      Shared dependencies
+      Workspace tools
+    CI/CD integration
+      Dependency caching
+      Integrity verification
+      Install scripts security
+#+end_src
+
+* Modern Dependency Management Trends
+
+** Deterministic Builds
+
+#+begin_src mermaid :file ../diagrams/lockfiles-deterministic-builds.png
+flowchart LR
+    A[Source Code] --> B[Build Process]
+    B --> C[Build Artifacts]
+    
+    D[Lockfile] --> B
+    E[Node/npm version] --> B
+    F[OS/Architecture] --> B
+    G[Build Tool Versions] --> B
+    
+    subgraph "Deterministic Build"
+        B
+        D
+        E
+        F
+        G
+    end
+    
+    style D fill:#f96,stroke:#333,stroke-width:4px
+#+end_src
+
+** Zero-installs and Content-addressable Storage
+
+#+begin_src mermaid :file ../diagrams/lockfiles-zero-installs.png
+graph TD
+    subgraph "Traditional Package Manager"
+        A1[package.json] --> B1[Resolve Dependencies]
+        B1 --> C1[Download Packages]
+        C1 --> D1[Install to node_modules]
+        D1 --> E1[Ready to Use]
+    end
+    
+    subgraph "Zero-Install (Yarn PnP)"
+        A2[package.json + yarn.lock] --> B2[Use .pnp.cjs Loader]
+        B2 --> C2[Reference .yarn/cache]
+        C2 --> D2[Ready to Use]
+    end
+    
+    subgraph "Content-Addressable (pnpm)"
+        A3[package.json + pnpm-lock.yaml] --> B3[Use Global Store]
+        B3 --> C3[Create Symlinks]
+        C3 --> D3[Ready to Use]
+    end
+    
+    style B2 fill:#9cf,stroke:#333,stroke-width:2px
+    style B3 fill:#9cf,stroke:#333,stroke-width:2px
+#+end_src
+
+* Questions to Ask
+- What strategies do you recommend for resolving dependency conflicts?
+- How do you handle lockfile conflicts in a team environment?
+- What are the security implications of different package manager strategies?
+- How do monorepos affect dependency management?
+- What trends do you see in the future of package management?
+
+* TODO Items [0/4]
+- [ ] Try out Lockfile Explorer with a complex project
+- [ ] Compare install times between npm, yarn, and pnpm
+- [ ] Analyze node_modules size differences between package managers
+- [ ] Experiment with Yarn zero-installs
