@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  squiggleconf-dev:
+    build:
+      context: ../..
+      dockerfile: tools/docker/Dockerfile
+    container_name: squiggleconf-2025-dev
+    volumes:
+      - ../..:/app
+    ports:
+      - "3000:3000"  # Vite/React dev server
+      - "5173:5173"  # Vite default port
+      - "8000:8000"  # Deno/Node server
+      - "9000:9000"  # Another potential server
+    command: >
+      bash -c "check-tools && bash"
+    tty: true
+    stdin_open: true
+    environment:
+      - NODE_ENV=development
