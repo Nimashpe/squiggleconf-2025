@@ -1,0 +1,195 @@
+#+TITLE: SquiggleConf 2025 Contributors and Platform Testing
+#+AUTHOR: SquiggleConf Team
+#+DATE: <2025-06-17 Tue>
+#+STARTUP: overview
+
+* Contributors
+
+This file documents contributors to the SquiggleConf 2025 repository and platforms where the code has been tested.
+
+** Core Contributors
+
+- Your Name - Project setup and initial content
+
+** Platform Testing
+
+*** FreeBSD
+
+*Tested on FreeBSD 14.2-RELEASE (amd64)*
+
+| Tool         | Version                | Status      |
+|--------------+------------------------+-------------|
+| Node.js      | v22.14.0              | ✓ Working   |
+| npm          | 10.9.2                | ✓ Working   |
+| Go           | go1.21.13 freebsd/amd64 | ✓ Working   |
+| Rust         | 1.85.0                | ✓ Working   |
+| Python       | 3.11.11               | ✓ Working   |
+| TypeScript   | 5.3.0+ (via npm)      | ✓ Working   |
+| Babel        | 7.23.0+ (via npm)     | ✓ Working   |
+| WebAssembly  | wasm-pack (via cargo) | ✓ Working   |
+| Emacs        | 28.2+ (pkg install)   | ✓ Working   |
+
+*Environment:*
+#+begin_src
+FreeBSD nexushive 14.2-RELEASE FreeBSD 14.2-RELEASE releng/14.2-n269506-c8918d6c7412 GENERIC amd64
+#+end_src
+
+*Notes:*
+- All core development tools are available through the FreeBSD package manager (`pkg install`)
+- Rust tools like wasm-pack can be installed via cargo
+- Node.js tools can be installed via npm
+
+*** Linux
+
+*Tested on Ubuntu 24.04 (Docker container)*
+
+Docker environment provides a consistent development setup with all required tools pre-installed:
+
+| Tool         | Version            | Status      |
+|--------------+--------------------+-------------|
+| Node.js      | 20.x               | ✓ Working   |
+| npm          | Latest with Node   | ✓ Working   |
+| TypeScript   | Latest (npm global) | ✓ Working   |
+| Rust         | Latest stable      | ✓ Working   |
+| wasm-pack    | Latest stable      | ✓ Working   |
+| Go           | 1.21.0             | ✓ Working   |
+| Deno         | Latest stable      | ✓ Working   |
+| Bun          | Latest stable      | ✓ Working   |
+| Python       | 3.x (Ubuntu)       | ✓ Working   |
+
+*Notes:*
+- See [[file:tools/docker/README.md][Docker README]] for detailed setup and usage instructions
+- All examples and demo projects work in the Docker environment
+- Port mappings are configured for web services
+
+*Untested on Debian Linux (aarch64) - Raspberry Pi*
+
+| Tool         | Version | Status |
+|--------------+---------+--------|
+| Node.js      | TBD     | TBD    |
+| npm          | TBD     | TBD    |
+| Go           | TBD     | TBD    |
+| Rust         | TBD     | TBD    |
+| TypeScript   | TBD     | TBD    |
+| ...          | TBD     | TBD    |
+
+*Environment:*
+#+begin_src
+Linux pi 6.12.20+rpt-rpi-v8 #1 SMP PREEMPT Debian 1:6.12.20-1+rpt1~bpo12+1 (2025-03-19) aarch64 GNU/Linux
+#+end_src
+
+*Package manager:* apt
+
+*** macOS
+
+*Untested on macOS 11.6 (Big Sur) - x86_64*
+
+| Tool         | Version | Status |
+|--------------+---------+--------|
+| Node.js      | TBD     | TBD    |
+| npm          | TBD     | TBD    |
+| Go           | TBD     | TBD    |
+| Rust         | TBD     | TBD    |
+| TypeScript   | TBD     | TBD    |
+| ...          | TBD     | TBD    |
+
+*Environment:*
+#+begin_src
+Darwin jasons-mbp-2.lan 20.6.0 Darwin Kernel Version 20.6.0: Thu Jul 6 22:12:47 PDT 2023; root:xnu-7195.141.49.702.12~1/RELEASE_X86_64 x86_64
+#+end_src
+
+*Package manager:* Homebrew recommended
+
+*Notes:*
+- Add any macOS-specific installation notes or workarounds here
+
+*** Cloud Development Environments
+
+*Untested on GitHub Codespaces*
+
+| Tool         | Version | Status |
+|--------------+---------+--------|
+| Node.js      | TBD     | TBD    |
+| npm          | TBD     | TBD    |
+| Go           | TBD     | TBD    |
+| Rust         | TBD     | TBD    |
+| TypeScript   | TBD     | TBD    |
+| ...          | TBD     | TBD    |
+
+*Untested on Replit*
+
+| Tool         | Version | Status |
+|--------------+---------+--------|
+| Node.js      | TBD     | TBD    |
+| npm          | TBD     | TBD    |
+| Go           | TBD     | TBD    |
+| Rust         | TBD     | TBD    |
+| TypeScript   | TBD     | TBD    |
+| ...          | TBD     | TBD    |
+
+*Notes:*
+- Cloud development environments often have specialized setups and limitations
+- Configuration adjustments may be needed for optimal performance
+
+*** Windows
+
+*Not yet tested on Windows*
+
+If you test on Windows, please update this section with your findings:
+
+| Tool         | Version | Status |
+|--------------+---------+--------|
+| Node.js      |         |        |
+| npm          |         |        |
+| Go           |         |        |
+| Rust         |         |        |
+| TypeScript   |         |        |
+| ...          |         |        |
+
+*Environment:*
+- Windows version:
+- Architecture:
+- Package manager used:
+
+*Notes:*
+- Add any Windows-specific installation notes or workarounds here
+
+** How to Contribute Platform Testing
+
+If you test this repository on a different platform:
+
+1. Fork the repository
+2. Update this CONTRIBUTORS.org file with your platform test results
+3. Submit a pull request
+
+Please include:
+- OS name and version
+- CPU architecture
+- Tool versions tested
+- Any specific installation instructions for your platform
+- Notes on any issues encountered and workarounds
+
+* Contribution Guidelines
+
+** Code Contributions
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run any applicable tests
+5. Submit a pull request
+
+** Documentation Contributions
+
+We welcome improvements to:
+- Session notes
+- Tool documentation
+- Setup instructions
+- Diagrams and visualizations
+
+** Code of Conduct
+
+- Be respectful and inclusive
+- Provide constructive feedback
+- Help others learn and grow
+- Focus on the technology and learning opportunities

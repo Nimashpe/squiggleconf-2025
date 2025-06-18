@@ -24,9 +24,10 @@ This repository contains:
 
 ** Quick Links
 - [[file:schedule.org][Conference Schedule]]
-- [[file:day1/index.org][Day 1 Notes]]
-- [[file:day2/index.org][Day 2 Notes]]
+- [[file:sessions/index.org][Session Notes]]
+- [[file:speakers/index.org][Speaker Profiles]]
 - [[file:tools/setup.org][Development Setup]]
+- [[file:CONTRIBUTORS.org][Platform Testing & Contributors]]
 
 ** Building Exports
 To export all notes to HTML/PDF:
