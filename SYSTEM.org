@@ -1,0 +1,140 @@
+#+TITLE: System Information and Installed Tools
+#+AUTHOR: SquiggleConf Team
+#+DATE: <2025-06-17 Tue>
+#+STARTUP: overview
+
+* System Information
+#+begin_src shell
+FreeBSD nexushive 14.2-RELEASE FreeBSD 14.2-RELEASE releng/14.2-n269506-c8918d6c7412 GENERIC amd64
+#+end_src
+
+* Installed Development Tools
+
+** Core Web Development Tools
+
+| Tool/Language | Version        | Status      | Purpose                |
+|--------------+----------------+-------------+------------------------|
+| Node.js      | v22.14.0       | ✓ Installed | JavaScript runtime     |
+| npm          | 10.9.2         | ✓ Installed | Package manager        |
+| Deno         | 2.1.4 (stable) | ✓ Installed | Modern JS/TS runtime   |
+| TypeScript   | 5.6.2 (Deno)   | ✓ Installed | Type-safe JavaScript   |
+| Rust         | 1.85.0         | ✓ Installed | Systems programming    |
+| wasm-pack    | 0.13.1         | ✓ Installed | WebAssembly bundler    |
+| Go           | go1.21.13      | ✓ Installed | Programming language   |
+| Python       | 3.11.11        | ✓ Installed | Programming language   |
+
+** Web Browsers & Testing
+
+| Tool         | Version        | Status      | Purpose                |
+|-------------+----------------+-------------+------------------------|
+| Firefox ESR  | 128.11.0       | ✓ Installed | Web browser/testing    |
+| Chromium     | 134.0.6998.88  | ✓ Installed | Web browser/testing    |
+
+** Programming Languages & Tools
+
+| Tool         | Version        | Status      | Purpose                |
+|-------------+----------------+-------------+------------------------|
+| Racket       | 8.12 [cs]      | ✓ Installed | Programming language   |
+| Guile        | 3.0.10         | ✓ Installed | Scheme implementation  |
+| OCaml        | 4.14.2         | ✓ Installed | Functional language    |
+| Zig          | 0.13.0         | ✓ Installed | Systems language       |
+| Bison        | 3.8.2          | ✓ Installed | Parser generator       |
+| Fennel       | 1.5.3          | ✓ Installed | Lisp on Lua            |
+| Janet        | 1.37.1         | ✓ Installed | Functional language    |
+| Hy           | 1.0.0          | ✓ Installed | Lisp on Python        |
+| Ruby         | 3.2.7          | ✓ Installed | Programming language   |
+| OpenJDK      | 21.0.6         | ✓ Installed | Java platform          |
+| Clojure      | Latest         | ✓ Installed | Lisp on JVM            |
+
+** Developer Tools
+
+| Tool         | Version        | Status      | Purpose                |
+|-------------+----------------+-------------+------------------------|
+| Emacs        | GNU Emacs 30.1 | ✓ Installed | Editor                 |
+| Git          | 2.49.0         | ✓ Installed | Version control        |
+| GNU Make     | 4.4.1          | ✓ Installed | Build system           |
+| GNU grep     | 3.11           | ✓ Installed | Text search            |
+| GNU Awk      | 5.3.2          | ✓ Installed | Text processing        |
+| Graphviz     | 12.2.1         | ✓ Installed | Graph visualization    |
+| Babel        | 2.17.0         | ✓ Installed | Internationalization   |
+
+** Linting & Formatting Tools
+
+| Tool         | Version        | Status      | Purpose                |
+|-------------+----------------+-------------+------------------------|
+| ShellCheck   | 0.10.0         | ✓ Installed | Shell script linting   |
+| shfmt        | 3.10.0         | ✓ Installed | Shell script formatting|
+| tsc          | 5.6.2 (Deno)   | ✓ Installed | TypeScript checking    |
+| gofmt        | 1.21.13        | ✓ Installed | Go code formatting     |
+| rustfmt      | 1.85.0         | ✓ Installed | Rust code formatting   |
+
+* Recommended Additional Packages
+
+Before the conference, consider installing:
+
+** TypeScript for Node.js (optional)
+#+begin_src shell
+npm install -g typescript
+#+end_src
+- While TypeScript is available via Deno, having the standalone TypeScript compiler might be useful
+
+** Mermaid CLI
+#+begin_src shell
+npm install -g @mermaid-js/mermaid-cli
+#+end_src
+- Required for rendering Mermaid diagrams from Org files
+
+** Browser JavaScript Frameworks (if needed)
+#+begin_src shell
+npm install -g create-react-app
+npm install -g @vue/cli
+#+end_src
+- Useful if planning to follow along with framework examples
+
+** Jupyter Notebook Support
+#+begin_src shell
+pkg install py39-jupyter-notebook
+#+end_src
+- For running any Python notebook examples
+
+** LaTeX (if planning to export PDFs)
+#+begin_src shell
+pkg install texlive-full
+#+end_src
+- Required for PDF exports from Org mode
+
+* Required Emacs Packages
+
+For the best experience with Org mode:
+- ob-mermaid (for Mermaid diagrams)
+- org-babel language support
+
+You can install these using M-x package-install or by adding them to your =.emacs= file:
+
+#+begin_src emacs-lisp
+(use-package ob-mermaid
+  :ensure t
+  :config
+  (setq ob-mermaid-cli-path "/usr/local/bin/mmdc"))
+#+end_src
+
+* All Required Tools Are Already Installed
+
+Your system is well-prepared for the conference. All core tools needed for SquiggleConf 2025 sessions are already installed and up-to-date:
+
+- Node.js and npm for JavaScript/TypeScript development
+- Deno for modern JavaScript/TypeScript runtime
+- Rust with wasm-pack for WebAssembly demos
+- Go for backend and TS-to-Go examples
+- Racket, OCaml, Guile, Zig, Ruby, and JVM languages for language implementation examples
+- Bison for parser development and compiler construction
+- Java (OpenJDK 21) and Clojure for JVM-based examples
+- Emacs for Org mode editing
+- Firefox ESR and Chromium for web testing
+
+The only potential additions would be:
+
+1. Mermaid CLI if you plan to render the diagrams in the Org files
+2. Additional linters like eslint, pylint, and ruff for more thorough code checking
+
+A script for installing additional linters is available at [[file:tools/scripts/install-linters.sh][tools/scripts/install-linters.sh]]. The repository includes fallback mechanisms for when Mermaid CLI is not available.

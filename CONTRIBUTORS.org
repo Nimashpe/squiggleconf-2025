@@ -9,25 +9,52 @@ This file documents contributors to the SquiggleConf 2025 repository and platfor
 
 ** Core Contributors
 
-- Your Name - Project setup and initial content
+- Aidan Pace (GitHub: @aygp-dr) - Project setup and initial content
 
 ** Development Tools Used
 
-| Tool     | Version | Role                       |
-|----------+---------+-----------------------------|
-| FreeBSD  | 14.2    | Operating System           |
-| Emacs    | 30.1    | Editor                     |
-| Node.js  | v22.14.0| JavaScript Runtime         |
-| npm      | 10.9.2  | Package Manager            |
-| Deno     | 2.1.4   | JavaScript/TypeScript Runtime |
-| Rust     | 1.85.0  | Systems Programming        |
-| wasm-pack| 0.13.1  | WebAssembly Tool           |
-| Go       | 1.21.13 | Programming Language       |
-| Git      | 2.49.0  | Version Control            |
-| GNU Make | 4.4.1   | Build System               |
-| GNU grep | 3.11    | Text Search                |
-| GNU Awk  | 5.3.2   | Text Processing            |
-| Graphviz | 12.2.1  | Graph Visualization        |
+*** SquiggleConf Relevant Tools
+
+| Tool           | Version       | Role                       |
+|----------------+---------------+-----------------------------|
+| Node.js        | v22.14.0      | JavaScript Runtime         |
+| npm            | 10.9.2        | Package Manager            |
+| Deno           | 2.1.4         | JavaScript/TypeScript Runtime |
+| TypeScript     | 5.6.2 (Deno)  | Type-safe JavaScript       |
+| Rust           | 1.85.0        | Systems Programming        |
+| wasm-pack      | 0.13.1        | WebAssembly Tool           |
+| Go             | 1.21.13       | Programming Language       |
+| Firefox ESR    | 128.11.0      | Web Browser                |
+| Chromium       | 134.0.6998.88 | Web Browser                |
+
+*** Core Development Environment
+
+| Tool           | Version       | Role                       |
+|----------------+---------------+-----------------------------|
+| FreeBSD        | 14.2          | Operating System           |
+| Emacs          | 30.1          | Editor                     |
+| Git            | 2.49.0        | Version Control            |
+| GNU Make       | 4.4.1         | Build System               |
+| GNU grep       | 3.11          | Text Search                |
+| GNU Awk        | 5.3.2         | Text Processing            |
+| Graphviz       | 12.2.1        | Graph Visualization        |
+
+*** Additional Programming Languages
+
+| Language       | Version       | Role                       |
+|----------------+---------------+-----------------------------|
+| Python         | 3.11.11       | Programming Language       |
+| Racket         | 8.12 [cs]     | Language Implementation    |
+| Guile          | 3.0.10        | Scheme Implementation      |
+| OCaml          | 4.14.2        | Functional Language        |
+| Zig            | 0.13.0        | Systems Language           |
+| Fennel         | 1.5.3         | Lisp on Lua                |
+| Janet          | 1.37.1        | Functional Language        |
+| Hy             | 1.0.0         | Lisp on Python             |
+| Ruby           | 3.2.7         | Programming Language       |
+| OpenJDK        | 21.0.6        | Java Platform              |
+| Clojure        | Latest        | Lisp on JVM                |
+| Bison          | 3.8.2         | Parser Generator           |
 
 ** Platform Testing
 
@@ -35,17 +62,50 @@ This file documents contributors to the SquiggleConf 2025 repository and platfor
 
 *Tested on FreeBSD 14.2-RELEASE (amd64)*
 
-| Tool         | Version                | Status      |
-|--------------+------------------------+-------------|
-| Node.js      | v22.14.0              | ✓ Working   |
-| npm          | 10.9.2                | ✓ Working   |
-| Go           | go1.21.13 freebsd/amd64 | ✓ Working   |
-| Rust         | 1.85.0                | ✓ Working   |
-| Python       | 3.11.11               | ✓ Working   |
-| TypeScript   | 5.3.0+ (via npm)      | ✓ Working   |
-| Babel        | 7.23.0+ (via npm)     | ✓ Working   |
-| WebAssembly  | wasm-pack (via cargo) | ✓ Working   |
-| Emacs        | 28.2+ (pkg install)   | ✓ Working   |
+| Tool              | Version                | Status      |
+|-------------------+------------------------+-------------|
+| Core Environment  |                        |             |
+| Emacs             | 30.1                   | ✓ Working   |
+| Git               | 2.49.0                 | ✓ Working   |
+| GNU Make          | 4.4.1                  | ✓ Working   |
+| GNU grep          | 3.11                   | ✓ Working   |
+| GNU Awk           | 5.3.2                  | ✓ Working   |
+| Graphviz          | 12.2.1                 | ✓ Working   |
+|                   |                        |             |
+| Web Development   |                        |             |
+| Node.js           | v22.14.0               | ✓ Working   |
+| npm               | 10.9.2                 | ✓ Working   |
+| TypeScript        | 5.3.0+ (via npm)       | ✓ Working   |
+| Babel             | 7.23.0+ (via npm)      | ✓ Working   |
+| Firefox ESR       | 128.11.0               | ✓ Working   |
+| Chromium          | 134.0.6998.88          | ✓ Working   |
+|                   |                        |             |
+| System Languages  |                        |             |
+| Go                | go1.21.13 freebsd/amd64 | ✓ Working   |
+| Rust              | 1.85.0                 | ✓ Working   |
+| WebAssembly       | wasm-pack (via cargo)  | ✓ Working   |
+| Zig               | 0.13.0                 | ✓ Working   |
+|                   |                        |             |
+| Scripting/Dynamic |                        |             |
+| Python            | 3.11.11                | ✓ Working   |
+| Ruby              | 3.2.7                  | ✓ Working   |
+|                   |                        |             |
+| JVM Languages     |                        |             |
+| OpenJDK           | 21.0.6                 | ✓ Working   |
+| Clojure           | Latest                 | ✓ Working   |
+|                   |                        |             |
+| Lisp Family       |                        |             |
+| Racket            | 8.12 [cs]              | ✓ Working   |
+| Guile             | 3.0.10                 | ✓ Working   |
+| Fennel            | 1.5.3                  | ✓ Working   |
+| Janet             | 1.37.1                 | ✓ Working   |
+| Hy                | 1.0.0                  | ✓ Working   |
+|                   |                        |             |
+| ML Family         |                        |             |
+| OCaml             | 4.14.2                 | ✓ Working   |
+|                   |                        |             |
+| Other Tools       |                        |             |
+| Bison             | 3.8.2                  | ✓ Working   |
 
 *Environment:*
 #+begin_src
@@ -59,26 +119,25 @@ FreeBSD nexushive 14.2-RELEASE FreeBSD 14.2-RELEASE releng/14.2-n269506-c8918d6c
 
 *** Linux
 
-*Tested on Ubuntu 24.04 (Docker container)*
+*Untested on Ubuntu 24.04 (Docker container)*
 
-Docker environment provides a consistent development setup with all required tools pre-installed:
+Docker environment is provided but not yet tested:
 
 | Tool         | Version            | Status      |
 |--------------+--------------------+-------------|
-| Node.js      | 20.x               | ✓ Working   |
-| npm          | Latest with Node   | ✓ Working   |
-| TypeScript   | Latest (npm global) | ✓ Working   |
-| Rust         | Latest stable      | ✓ Working   |
-| wasm-pack    | Latest stable      | ✓ Working   |
-| Go           | 1.21.0             | ✓ Working   |
-| Deno         | Latest stable      | ✓ Working   |
-| Bun          | Latest stable      | ✓ Working   |
-| Python       | 3.x (Ubuntu)       | ✓ Working   |
+| Node.js      | 20.x               | Untested    |
+| npm          | Latest with Node   | Untested    |
+| TypeScript   | Latest (npm global) | Untested    |
+| Rust         | Latest stable      | Untested    |
+| wasm-pack    | Latest stable      | Untested    |
+| Go           | 1.21.0             | Untested    |
+| Deno         | Latest stable      | Untested    |
+| Bun          | Latest stable      | Untested    |
+| Python       | 3.x (Ubuntu)       | Untested    |
 
 *Notes:*
-- See [[file:tools/docker/README.md][Docker README]] for detailed setup and usage instructions
-- All examples and demo projects work in the Docker environment
-- Port mappings are configured for web services
+- See [[file:tools/docker/README.md][Docker README]] for setup instructions
+- Docker environment is ready but needs to be tested before the conference
 
 *Untested on Debian Linux (aarch64) - Raspberry Pi*
 

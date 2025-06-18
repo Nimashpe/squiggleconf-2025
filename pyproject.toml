@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "squiggleconf-2025"
+version = "0.1.0"
+description = "SquiggleConf 2025 Notes"
+requires-python = ">=3.9"
+dependencies = [
+    "files-to-prompt>=0.6",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "pylint>=3.3.7",
+    "ruff>=0.12.0",
+    "strip-tags>=0.6",
+    "ttok>=0.3",
+    "yamllint>=1.37.1",
+]
+
+[tool.setuptools]
+packages = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pylint>=2.15.0",
+    "ruff>=0.0.254",
+    "black>=23.1.0",
+    "mypy>=1.0.0",
+]
+
+[tool.ruff]
+select = ["E", "F", "B", "I"]
+ignore = []
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.isort]
+known-first-party = ["squiggleconf"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]

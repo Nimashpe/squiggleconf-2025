@@ -14,6 +14,13 @@ The notes in this repository use several code block languages:
 - JSON (json)
 - Rust (rust)
 - GraphViz (dot)
+- Racket (racket)
+- Zig (zig)
+- OCaml (ocaml)
+- Scheme/Guile (scheme)
+- Fennel (fennel)
+- Janet (janet)
+- Hy (hy)
 
 ## Basic Setup
 
@@ -37,6 +44,13 @@ For a complete setup with all features, you'll need:
    - typescript-mode (for TypeScript)
    - json-mode (for JSON)
    - rust-mode (for Rust)
+   - racket-mode (for Racket)
+   - zig-mode (for Zig)
+   - tuareg (for OCaml)
+   - geiser (for Scheme/Guile)
+   - fennel-mode (for Fennel)
+   - janet-mode (for Janet)
+   - hy-mode (for Hy)
 
 ### Installation with use-package
 
@@ -57,6 +71,27 @@ For a complete setup with all features, you'll need:
   :ensure t)
 
 (use-package rust-mode
+  :ensure t)
+  
+(use-package racket-mode
+  :ensure t)
+  
+(use-package zig-mode
+  :ensure t)
+  
+(use-package tuareg
+  :ensure t)
+  
+(use-package geiser
+  :ensure t)
+  
+(use-package fennel-mode
+  :ensure t)
+  
+(use-package janet-mode
+  :ensure t)
+  
+(use-package hy-mode
   :ensure t)
 
 ;; Load the SquiggleConf Babel setup
@@ -105,7 +140,9 @@ If you encounter issues with specific languages:
 2. Ensure any external programs (like Node.js or Mermaid CLI) are installed
 3. Try manually loading the required mode (e.g., `(require 'json-mode)`)
 
-For Mermaid diagrams without the CLI, the placeholder function in `squiggleconf-babel.el` will prevent errors but won't generate diagrams.
+For Mermaid diagrams without the CLI, the placeholder function in `squiggleconf-babel.el` will prevent errors and save the diagram source to a file for later rendering on systems with the CLI installed.
+
+Similarly, for language modes not available in your Emacs installation, fallback handlers are provided that will prevent errors but won't execute the code.
 
 ## Manual Testing
 

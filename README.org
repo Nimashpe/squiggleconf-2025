@@ -22,6 +22,26 @@ This repository contains:
 - System diagrams using Mermaid
 - Executable code blocks using Babel
 
+** Language Tutorials and Refreshers
+
+Refresh your knowledge before the conference with these ~4-hour tutorials:
+
+*** Web Development
+- TypeScript: [[https://www.typescriptlang.org/docs/handbook/intro.html][TypeScript Handbook]]  
+- Go: [[https://go.dev/tour/][A Tour of Go]]
+- Rust: [[https://doc.rust-lang.org/book/][The Rust Book]]
+- WebAssembly: [[https://developer.mozilla.org/en-US/docs/WebAssembly/Concepts][MDN WebAssembly Concepts]]
+
+*** Functional Languages 
+- OCaml: [[https://ocaml.org/learn/tutorials/basics.html][OCaml Basics]]
+- Racket: [[https://docs.racket-lang.org/quick/][Quick Introduction to Racket]]
+- Clojure: [[https://clojure.org/guides/learn/syntax][Learn Clojure]]
+
+*** Systems & Tools
+- Zig: [[https://ziglang.org/learn/overview/][Zig Language Overview]]
+- Parser Development: [[https://www.gnu.org/software/bison/manual/html_node/][Bison Manual]]
+- Babel/JSX: [[https://babeljs.io/docs/babel-preset-react][Babel Documentation]]
+
 ** Quick Links
 - [[file:schedule.org][Conference Schedule]]
 - [[file:sessions/index.org][Session Notes]]
@@ -29,9 +49,46 @@ This repository contains:
 - [[file:tools/setup.org][Development Setup]]
 - [[file:CONTRIBUTORS.org][Platform Testing & Contributors]]
 
-** Building Exports
-To export all notes to HTML/PDF:
-#+begin_src bash :tangle tools/scripts/export-all.sh :shebang "#!/bin/bash"
-# Export all org files to HTML
-find . -name "*.org" -exec emacs --batch --eval "(progn (find-file \"{}\") (org-html-export-to-html))" \;
+** Available Makefile Targets
+
+Use the Makefile to interact with the repository:
+
+#+begin_src bash
+# View available targets (default)
+gmake help
+
+# Validate Org files
+gmake validate-org
+
+# Tangle code blocks from Org files
+gmake tangle
+
+# Export to various formats
+gmake export-html
+gmake export-pdf
+gmake export-md
 #+end_src
+
+** Linting Code Examples
+
+All code examples tangled from Org files can be linted using the Makefile:
+
+#+begin_src bash
+# Lint all code in the repository
+gmake lint
+
+# Lint specific language only
+gmake lint-js      # JavaScript/TypeScript
+gmake lint-shell   # Shell scripts
+gmake lint-go      # Go
+gmake lint-rust    # Rust
+gmake lint-python  # Python
+gmake lint-ruby    # Ruby
+gmake lint-clojure # Clojure
+#+end_src
+
+The repository includes configuration files for all major languages:
+- =package.json= and =tsconfig.json= for JavaScript/TypeScript
+- =pyproject.toml= for Python
+- =project.clj= for Clojure
+- =rust-toolchain.toml= for Rust
