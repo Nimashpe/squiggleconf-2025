@@ -1,0 +1,1758 @@
+#+TITLE: Advanced Zig Debugging and AST Analysis
+#+AUTHOR: SquiggleConf 2025 Team
+#+DATE: <2025-06-18 Wed>
+#+STARTUP: overview
+#+PROPERTY: header-args:zig :results output
+
+* Zig Debugging & AST Analysis for Staff+ Engineers
+
+This tutorial provides in-depth coverage of advanced Zig debugging techniques and Abstract Syntax Tree (AST) manipulation for building sophisticated developer tools and compilers.
+
+** Prerequisites
+
+- Strong understanding of Zig fundamentals
+- Familiarity with Zig's comptime and memory model
+- Zig toolchain installed (0.11.0 or later)
+- Experience with basic debugging techniques
+
+Let's set up our environment:
+
+#+begin_src zig :tangle setup.zig
+const std = @import("std");
+const builtin = @import("builtin");
+
+pub fn main() \!void {
+    // Check Zig version
+    std.debug.print("Zig version: {}\n", .{builtin.zig_version});
+    std.debug.print("Target: {s}-{s}-{s}\n", .{
+        @tagName(builtin.cpu.arch),
+        @tagName(builtin.os.tag),
+        @tagName(builtin.abi),
+    });
+    
+    // Check for necessary tools
+    const allocator = std.heap.page_allocator;
+    
+    // Check for lldb or gdb
+    const lldb_check = try checkCommand(allocator, "lldb", "--version");
+    if (lldb_check) {
+        std.debug.print("LLDB is available\n", .{});
+    } else {
+        const gdb_check = try checkCommand(allocator, "gdb", "--version");
+        if (gdb_check) {
+            std.debug.print("GDB is available\n", .{});
+        } else {
+            std.debug.print("Neither LLDB nor GDB found. Install one for better debugging experience.\n", .{});
+        }
+    }
+    
+    std.debug.print("\nYou're ready to start the Zig debugging and AST analysis tutorial\!\n", .{});
+}
+
+fn checkCommand(allocator: std.mem.Allocator, command: []const u8, arg: []const u8) \!bool {
+    const result = std.ChildProcess.exec(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ command, arg },
+    }) catch return false;
+    defer {
+        allocator.free(result.stdout);
+        allocator.free(result.stderr);
+    }
+    return result.term.Exited and result.term.code == 0;
+}
+#+end_src
+
+** Advanced Debugging Techniques in Zig
+
+*** Using LLDB and GDB with Zig
+
+Zig works well with standard debuggers like LLDB and GDB. Here's a sample program to demonstrate debugging capabilities:
+
+#+begin_src zig :tangle debugging/debug_sample.zig
+const std = @import("std");
+
+// Define a simple struct for demonstration
+const User = struct {
+    id: u64,
+    name: []const u8,
+    email: []const u8,
+    active: bool,
+    
+    pub fn init(id: u64, name: []const u8, email: []const u8) User {
+        return User{
+            .id = id,
+            .name = name,
+            .email = email,
+            .active = true,
+        };
+    }
+    
+    pub fn deactivate(self: *User) void {
+        self.active = false;
+    }
+    
+    pub fn print(self: User) void {
+        std.debug.print("User {d}: {s} ({s}) - Active: {}\n", .{
+            self.id, self.name, self.email, self.active
+        });
+    }
+};
+
+// A function with a bug for debugging practice
+fn findUserById(users: []const User, id: u64) ?*const User {
+    // Bug: Off-by-one error in the loop bound
+    for (users, 0..users.len - 1)  < /dev/null | *user, i| {
+        if (user.id == id) {
+            return user;
+        }
+    }
+    return null;
+}
+
+// A recursive function to demonstrate stack analysis
+fn factorial(n: u64) u64 {
+    if (n <= 1) return 1;
+    return n * factorial(n - 1);
+}
+
+// A function with a potential overflow issue
+fn sumNumbers(numbers: []const u32) u32 {
+    var sum: u32 = 0;
+    for (numbers) |num| {
+        // Potential overflow if sum + num > max u32
+        sum += num;
+    }
+    return sum;
+}
+
+// Allocator demonstration for memory debugging
+fn createLargeArray(allocator: std.mem.Allocator, size: usize) \![]u64 {
+    const array = try allocator.alloc(u64, size);
+    for (array, 0..) |*item, i| {
+        item.* = i * i;
+    }
+    return array;
+}
+
+pub fn main() \!void {
+    // Create a collection of users
+    var users = [_]User{
+        User.init(1, "Alice", "alice@example.com"),
+        User.init(2, "Bob", "bob@example.com"),
+        User.init(3, "Charlie", "charlie@example.com"),
+        User.init(4, "Diana", "diana@example.com"),
+    };
+    
+    // Deactivate one user
+    users[1].deactivate();
+    
+    // Print all users
+    for (users) |user| {
+        user.print();
+    }
+    
+    // Try to find users - the last one will fail due to the bug
+    const found_user1 = findUserById(&users, 1);
+    const found_user2 = findUserById(&users, 2);
+    const found_user4 = findUserById(&users, 4); // This will fail due to the bug
+    
+    std.debug.print("\nLookup results:\n", .{});
+    if (found_user1) |user| {
+        std.debug.print("Found user 1: {s}\n", .{user.name});
+    } else {
+        std.debug.print("User 1 not found\n", .{});
+    }
+    
+    if (found_user2) |user| {
+        std.debug.print("Found user 2: {s}\n", .{user.name});
+    } else {
+        std.debug.print("User 2 not found\n", .{});
+    }
+    
+    if (found_user4) |user| {
+        std.debug.print("Found user 4: {s}\n", .{user.name});
+    } else {
+        std.debug.print("User 4 not found\n", .{});
+    }
+    
+    // Demonstrate factorial for stack analysis
+    const fact10 = factorial(10);
+    std.debug.print("\nFactorial of 10 is {d}\n", .{fact10});
+    
+    // Demonstrate potential overflow
+    const numbers = [_]u32{ 1, 2, 3, 4, 5, 4294967290 }; // Last number close to u32 max
+    const sum = sumNumbers(&numbers);
+    std.debug.print("Sum is {d}\n", .{sum});
+    
+    // Memory allocation demo
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    
+    const large_array = try createLargeArray(allocator, 1000);
+    defer allocator.free(large_array);
+    
+    std.debug.print("Created array of size {d}\n", .{large_array.len});
+    std.debug.print("First few values: {d}, {d}, {d}...\n", .{
+        large_array[0], large_array[1], large_array[2]
+    });
+}
+#+end_src
+
+*** Debugging with LLDB
+
+Here's a guide for debugging Zig programs with LLDB:
+
+#+begin_src bash :tangle debugging/lldb_session.sh
+#\!/bin/bash
+# Script demonstrating LLDB debugging commands for Zig
+
+# Build with debug symbols
+zig build-exe debug_sample.zig -O Debug
+
+echo "=== LLDB Debugging Session for Zig ==="
+echo "Starting debugging session..."
+
+cat << 'EOF'
+# Start LLDB with the compiled binary
+lldb ./debug_sample
+
+# Set breakpoints
+breakpoint set --name main
+breakpoint set --name findUserById
+
+# Run the program
+run
+
+# Continue to the next breakpoint
+continue
+
+# Examine arguments and local variables
+frame variable
+frame variable users
+
+# Show the source code context
+source list
+
+# Step through code
+step
+
+# Step over functions
+next
+
+# Print expressions
+expression users[0].name
+expression users.len
+
+# Check memory addresses
+expression &users[0]
+expression &users[0].name
+
+# Examine array values
+expression users[0]
+expression users[1]
+
+# Create a watchpoint for a variable
+watchpoint set variable users[1].active
+
+# Continue execution until watchpoint triggers
+continue
+
+# Show backtrace
+bt
+
+# Switch to a different frame
+frame select 1
+
+# View types in Zig
+type summary add --summary-string "${var.id}: ${var.name}" User
+
+# Show User instances with custom summary
+frame variable --show-types users
+
+# Exit debugger
+quit
+EOF
+
+echo -e "\nTo run the full debugging session, execute:"
+echo "lldb ./debug_sample"
+*** Memory Analysis in Zig
+
+Zig's memory safety features prevent many common bugs, but we still need tools to debug memory issues:
+
+#+begin_src zig :tangle debugging/memory_issues.zig
+const std = @import("std");
+
+// Structure for demonstrating memory management
+const Node = struct {
+    value: i32,
+    children: std.ArrayList(*Node),
+    allocator: std.mem.Allocator,
+    
+    // Constructor
+    pub fn init(allocator: std.mem.Allocator, value: i32) Node {
+        return Node{
+            .value = value,
+            .children = std.ArrayList(*Node).init(allocator),
+            .allocator = allocator,
+        };
+    }
+    
+    // Add a child node
+    pub fn addChild(self: *Node, child: *Node) \!void {
+        try self.children.append(child);
+    }
+    
+    // Free memory
+    pub fn deinit(self: *Node) void {
+        self.children.deinit();
+    }
+};
+
+// Function demonstrating proper memory management
+fn createTree(allocator: std.mem.Allocator) \!*Node {
+    var root = try allocator.create(Node);
+    root.* = Node.init(allocator, 1);
+    
+    var child1 = try allocator.create(Node);
+    child1.* = Node.init(allocator, 2);
+    
+    var child2 = try allocator.create(Node);
+    child2.* = Node.init(allocator, 3);
+    
+    try root.addChild(child1);
+    try root.addChild(child2);
+    
+    return root;
+}
+
+// Function to properly free the tree
+fn destroyTree(allocator: std.mem.Allocator, node: *Node) void {
+    for (node.children.items)  < /dev/null | child| {
+        destroyTree(allocator, child);
+    }
+    node.deinit();
+    allocator.destroy(node);
+}
+
+// Function with a potential memory leak
+fn createLeakyBuffer(allocator: std.mem.Allocator, size: usize) \!void {
+    const buffer = try allocator.alloc(u8, size);
+    // Fill the buffer
+    for (buffer, 0..) |*byte, i| {
+        byte.* = @intCast(i % 256);
+    }
+    
+    // Oops, we forgot to free the buffer\! (in a real program)
+    // Proper code would be: defer allocator.free(buffer);
+    _ = buffer;
+}
+
+// Function with potential use-after-free
+fn useAfterFreeExample(allocator: std.mem.Allocator) void {
+    var data = allocator.create(i32) catch unreachable;
+    data.* = 42;
+    
+    // Use the data
+    std.debug.print("Data value: {d}\n", .{data.*});
+    
+    // Free the memory
+    allocator.destroy(data);
+    
+    // In a real program with a bug, we might accidentally use data after freeing
+    // This would cause undefined behavior
+    // std.debug.print("After free: {d}\n", .{data.*});
+}
+
+// Function with unsafe buffer access for demonstration
+fn unsafeBufferAccess(buffer: []u8, index: usize) u8 {
+    // No bounds checking in release mode
+    if (index < buffer.len) {
+        return buffer[index];
+    }
+    return 0;
+}
+
+pub fn main() \!void {
+    // Setup a memory leak detector
+    var detected_leaks = false;
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){};
+    defer {
+        const leaked = gpa.deinit();
+        if (leaked) {
+            detected_leaks = true;
+            std.debug.print("Memory leaks detected\!\n", .{});
+        } else {
+            std.debug.print("No memory leaks detected.\n", .{});
+        }
+    }
+    const allocator = gpa.allocator();
+    
+    // Demonstration of proper memory management
+    std.debug.print("=== Proper Memory Management ===\n", .{});
+    const tree = try createTree(allocator);
+    std.debug.print("Created tree with root value: {d}\n", .{tree.value});
+    std.debug.print("Tree has {d} children\n", .{tree.children.items.len});
+    
+    // Proper cleanup
+    destroyTree(allocator, tree);
+    std.debug.print("Tree destroyed properly\n", .{});
+    
+    // Create an intentional memory leak for demonstration
+    try createLeakyBuffer(allocator, 1024);
+    std.debug.print("Created buffer that will leak\n", .{});
+    
+    // Demonstrate potential use-after-free
+    useAfterFreeExample(allocator);
+    
+    // Demonstrate unsafe buffer access
+    var safe_buffer = [_]u8{ 1, 2, 3, 4, 5 };
+    const safe_value = unsafeBufferAccess(&safe_buffer, 2);
+    std.debug.print("Safe access result: {d}\n", .{safe_value});
+    
+    // This would be unsafe in a real program
+    // const unsafe_value = unsafeBufferAccess(&safe_buffer, 10);
+    
+    std.debug.print("\n=== Memory Analysis Complete ===\n", .{});
+    if (detected_leaks) {
+        std.debug.print("Leaks were detected (as expected for demonstration)\n", .{});
+    }
+}
+#+end_src
+
+*** Advanced Zig Debugging Commands
+
+Here's a reference guide for advanced debugging commands specific to Zig:
+
+#+begin_src bash :tangle debugging/zig_debug_commands.sh
+#\!/bin/bash
+# Advanced Zig debugging commands and techniques
+
+echo "=== Advanced Zig Debugging Commands ==="
+
+# Build with debug info and stack traces
+cat << 'EOF'
+# Build with debug info
+zig build-exe your_file.zig -O Debug
+
+# Enable stack traces
+export ZIG_DEBUG_COLOR=1
+export ZIG_DEBUG_PANIC=1
+export ZIG_DEBUG_LOG_LEVEL=debug
+
+# Run with stack trace on error
+./your_program
+
+# Using Zig's debug print
+// In your code
+std.debug.print("Debug: {any}\n", .{your_variable});
+
+# Memory leak detection with GPA
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+defer {
+    const leaked = gpa.deinit();
+    if (leaked) @panic("Memory leak detected");
+}
+const allocator = gpa.allocator();
+
+# Build with Address Sanitizer
+zig build-exe your_file.zig -fsanitize=address
+
+# Run with custom allocator failure
+ZIG_DEBUG_ALLOCATION_FAILURE_PROBABILITY=0.01 ./your_program
+
+# Detect stack use after return
+zig build-exe your_file.zig -fsanitize=address -fsanitize-thread-use-after-return
+
+# Run Valgrind on Zig program
+valgrind --leak-check=full --show-leak-kinds=all ./your_program
+
+# Useful LLDB commands for Zig
+lldb ./your_program
+breakpoint set --file your_file.zig --line 42
+frame variable --show-types
+expr --language C++ -- @import("std").debug.print("Hello", .{})
+memory read --size 8 --format x --count 4 0x12345678
+
+# Debug comptime code
+zig build-exe your_file.zig -ftime-report
+
+# View optimized machine code
+zig build-exe your_file.zig -O ReleaseFast --emit asm
+cat *.s
+
+# Useful GDB commands for Zig
+gdb ./your_program
+break your_file.zig:42
+info locals
+call (void)puts("Hello")
+x/4xg 0x12345678
+
+# Profile with perf
+perf record ./your_program
+perf report
+EOF
+
+echo "=== End of Advanced Debugging Commands ==="
+
+** Zig AST Analysis and Manipulation
+
+Zig offers powerful tools for examining and manipulating its Abstract Syntax Tree (AST) during compilation.
+
+*** Examining the AST with Comptime Reflection
+
+Zig's comptime introspection abilities let us analyze code structure at compile time:
+
+#+begin_src zig :tangle ast/ast_inspector.zig
+const std = @import("std");
+
+// A sample struct to analyze
+const Person = struct {
+    name: []const u8,
+    age: u32,
+    active: bool,
+    
+    pub fn init(name: []const u8, age: u32) Person {
+        return Person{
+            .name = name,
+            .age = age,
+            .active = true,
+        };
+    }
+    
+    pub fn deactivate(self: *Person) void {
+        self.active = false;
+    }
+    
+    pub fn isAdult(self: Person) bool {
+        return self.age >= 18;
+    }
+};
+
+// Enum to demonstrate type introspection
+const Color = enum {
+    red,
+    green,
+    blue,
+    
+    pub fn isRed(self: Color) bool {
+        return self == .red;
+    }
+    
+    pub fn isBlue(self: Color) bool {
+        return self == .blue;
+    }
+};
+
+// Union to demonstrate more complex type introspection
+const Value = union(enum) {
+    integer: i64,
+    float: f64,
+    text: []const u8,
+    
+    pub fn asText(self: Value) []const u8 {
+        switch (self) {
+            .integer =>  < /dev/null | i| return std.fmt.allocPrint(
+                std.heap.page_allocator, 
+                "{d}", 
+                .{i}
+            ) catch "error",
+            .float => |f| return std.fmt.allocPrint(
+                std.heap.page_allocator,
+                "{d}", 
+                .{f}
+            ) catch "error",
+            .text => |t| return t,
+        }
+    }
+};
+
+// Function to print all fields of a struct type at compile time
+fn dumpStructFields(comptime T: type) void {
+    const info = @typeInfo(T);
+    
+    // Ensure we're dealing with a struct
+    switch (info) {
+        .Struct => |structInfo| {
+            std.debug.print("Struct: {s}\n", .{@typeName(T)});
+            std.debug.print("Fields:\n", .{});
+            
+            inline for (structInfo.fields) |field| {
+                std.debug.print("  {s}: {s}\n", .{field.name, @typeName(field.type)});
+            }
+            
+            std.debug.print("Methods:\n", .{});
+            const decls = comptime std.meta.declarations(T);
+            inline for (decls) |decl| {
+                // Filter for functions only
+                if (decl.is_pub) {
+                    const DeclType = @TypeOf(@field(T, decl.name));
+                    const declInfo = @typeInfo(DeclType);
+                    
+                    if (declInfo == .Fn) {
+                        std.debug.print("  {s}\n", .{decl.name});
+                    }
+                }
+            }
+            std.debug.print("\n", .{});
+        },
+        else => @compileError("Expected struct type, got " ++ @typeName(T)),
+    }
+}
+
+// Function to print all variants of an enum type
+fn dumpEnumFields(comptime T: type) void {
+    const info = @typeInfo(T);
+    
+    switch (info) {
+        .Enum => |enumInfo| {
+            std.debug.print("Enum: {s}\n", .{@typeName(T)});
+            std.debug.print("Fields:\n", .{});
+            
+            inline for (enumInfo.fields) |field| {
+                std.debug.print("  {s}\n", .{field.name});
+            }
+            
+            std.debug.print("Methods:\n", .{});
+            const decls = comptime std.meta.declarations(T);
+            inline for (decls) |decl| {
+                // Filter for functions only
+                if (decl.is_pub) {
+                    const DeclType = @TypeOf(@field(T, decl.name));
+                    const declInfo = @typeInfo(DeclType);
+                    
+                    if (declInfo == .Fn) {
+                        std.debug.print("  {s}\n", .{decl.name});
+                    }
+                }
+            }
+            std.debug.print("\n", .{});
+        },
+        else => @compileError("Expected enum type, got " ++ @typeName(T)),
+    }
+}
+
+// Function to print union variants and payload types
+fn dumpUnionFields(comptime T: type) void {
+    const info = @typeInfo(T);
+    
+    switch (info) {
+        .Union => |unionInfo| {
+            std.debug.print("Union: {s}\n", .{@typeName(T)});
+            std.debug.print("Fields:\n", .{});
+            
+            inline for (unionInfo.fields) |field| {
+                std.debug.print("  {s}: {s}\n", .{field.name, @typeName(field.type)});
+            }
+            
+            if (unionInfo.tag_type) |tagType| {
+                std.debug.print("Tag type: {s}\n", .{@typeName(tagType)});
+            } else {
+                std.debug.print("Untagged union\n", .{});
+            }
+            
+            std.debug.print("Methods:\n", .{});
+            const decls = comptime std.meta.declarations(T);
+            inline for (decls) |decl| {
+                // Filter for functions only
+                if (decl.is_pub) {
+                    const DeclType = @TypeOf(@field(T, decl.name));
+                    const declInfo = @typeInfo(DeclType);
+                    
+                    if (declInfo == .Fn) {
+                        std.debug.print("  {s}\n", .{decl.name});
+                    }
+                }
+            }
+            std.debug.print("\n", .{});
+        },
+        else => @compileError("Expected union type, got " ++ @typeName(T)),
+    }
+}
+
+// Generic function to analyze any type
+fn analyzeType(comptime T: type) void {
+    const info = @typeInfo(T);
+    
+    std.debug.print("=== Type Analysis for {s} ===\n", .{@typeName(T)});
+    
+    switch (info) {
+        .Struct => dumpStructFields(T),
+        .Enum => dumpEnumFields(T),
+        .Union => dumpUnionFields(T),
+        .Int => std.debug.print("Integer type with {d} bits, signed: {}\n", 
+            .{info.Int.bits, info.Int.signedness == .signed}),
+        .Float => std.debug.print("Float type with {d} bits\n", .{info.Float.bits}),
+        .Pointer => std.debug.print("Pointer to {s}, size: {s}\n", 
+            .{@typeName(info.Pointer.child), @tagName(info.Pointer.size)}),
+        .Array => std.debug.print("Array of {d} elements of type {s}\n", 
+            .{info.Array.len, @typeName(info.Array.child)}),
+        .Optional => std.debug.print("Optional of {s}\n", .{@typeName(info.Optional.child)}),
+        .ErrorUnion => std.debug.print("Error union with payload {s}\n", 
+            .{@typeName(info.ErrorUnion.payload)}),
+        else => std.debug.print("Other type: {s}\n", .{@typeName(T)}),
+    }
+}
+
+pub fn main() void {
+    // Analyze various types
+    analyzeType(Person);
+    analyzeType(Color);
+    analyzeType(Value);
+    
+    // Analyze built-in types
+    analyzeType(i32);
+    analyzeType(f64);
+    analyzeType([5]u8);
+    analyzeType([]const u8);
+    analyzeType(?i32);
+    analyzeType(anyerror\!i32);
+    
+    // Create instances of our types
+    var person = Person.init("Alice", 30);
+    var color = Color.red;
+    var value = Value{ .text = "Hello" };
+    
+    // Use the instances
+    std.debug.print("\n=== Runtime Values ===\n", .{});
+    std.debug.print("Person: {s}, {d}, active: {}\n", 
+        .{person.name, person.age, person.active});
+    std.debug.print("Is adult: {}\n", .{person.isAdult()});
+    
+    std.debug.print("Color: {s}\n", .{@tagName(color)});
+    std.debug.print("Is red: {}\n", .{color.isRed()});
+    
+    std.debug.print("Value as text: {s}\n", .{value.asText()});
+}
+#+end_src
+
+*** Building a Custom Comptime Interpreter
+
+Zig's comptime facilities allow us to create a simple interpreter at compile time:
+
+#+begin_src zig :tangle ast/comptime_interpreter.zig
+const std = @import("std");
+
+// Define our custom AST nodes
+const ExprType = enum {
+    literal,
+    binary,
+    unary,
+    variable,
+    block,
+    if_expr,
+    assignment,
+};
+
+const BinaryOp = enum {
+    add,
+    subtract,
+    multiply,
+    divide,
+    equals,
+    not_equals,
+    less_than,
+    greater_than,
+};
+
+const UnaryOp = enum {
+    negate,
+    not,
+};
+
+// Define the expression type using a tagged union
+const Expr = union(ExprType) {
+    literal: LiteralExpr,
+    binary: BinaryExpr,
+    unary: UnaryExpr,
+    variable: VariableExpr,
+    block: BlockExpr,
+    if_expr: IfExpr,
+    assignment: AssignmentExpr,
+
+    // Create functions to construct expressions
+    pub fn number(value: f64) Expr {
+        return Expr{ .literal = LiteralExpr{ .number = value } };
+    }
+    
+    pub fn boolean(value: bool) Expr {
+        return Expr{ .literal = LiteralExpr{ .boolean = value } };
+    }
+    
+    pub fn string(value: []const u8) Expr {
+        return Expr{ .literal = LiteralExpr{ .string = value } };
+    }
+    
+    pub fn binary(left: Expr, op: BinaryOp, right: Expr) Expr {
+        return Expr{ .binary = BinaryExpr{ .left = left, .operator = op, .right = right } };
+    }
+    
+    pub fn unary(op: UnaryOp, right: Expr) Expr {
+        return Expr{ .unary = UnaryExpr{ .operator = op, .right = right } };
+    }
+    
+    pub fn variable(name: []const u8) Expr {
+        return Expr{ .variable = VariableExpr{ .name = name } };
+    }
+    
+    pub fn block(statements: []const Expr) Expr {
+        return Expr{ .block = BlockExpr{ .statements = statements } };
+    }
+    
+    pub fn if_expr(condition: Expr, then_branch: Expr, else_branch: ?Expr) Expr {
+        return Expr{ .if_expr = IfExpr{
+            .condition = condition,
+            .then_branch = then_branch,
+            .else_branch = else_branch,
+        }};
+    }
+    
+    pub fn assignment(name: []const u8, value: Expr) Expr {
+        return Expr{ .assignment = AssignmentExpr{
+            .name = name,
+            .value = value,
+        }};
+    }
+};
+
+// Value type for our interpreter
+const Value = union(enum) {
+    number: f64,
+    boolean: bool,
+    string: []const u8,
+    null_val: void,
+    
+    // Helper methods for printing
+    pub fn format(self: Value, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) \!void {
+        _ = fmt;
+        _ = options;
+        
+        switch (self) {
+            .number => |n| try writer.print("{d}", .{n}),
+            .boolean => |b| try writer.print("{}", .{b}),
+            .string => |s| try writer.print("\"{s}\"", .{s}),
+            .null_val => try writer.writeAll("null"),
+        }
+    }
+};
+
+// Expression node types
+const LiteralExpr = union(enum) {
+    number: f64,
+    boolean: bool,
+    string: []const u8,
+};
+
+const BinaryExpr = struct {
+    left: Expr,
+    operator: BinaryOp,
+    right: Expr,
+};
+
+const UnaryExpr = struct {
+    operator: UnaryOp,
+    right: Expr,
+};
+
+const VariableExpr = struct {
+    name: []const u8,
+};
+
+const BlockExpr = struct {
+    statements: []const Expr,
+};
+
+const IfExpr = struct {
+    condition: Expr,
+    then_branch: Expr,
+    else_branch: ?Expr,
+};
+
+const AssignmentExpr = struct {
+    name: []const u8,
+    value: Expr,
+};
+
+// Environment to hold variables
+const Environment = struct {
+    variables: std.StringHashMap(Value),
+    
+    pub fn init(allocator: std.mem.Allocator) Environment {
+        return Environment{
+            .variables = std.StringHashMap(Value).init(allocator),
+        };
+    }
+    
+    pub fn deinit(self: *Environment) void {
+        self.variables.deinit();
+    }
+    
+    pub fn define(self: *Environment, name: []const u8, value: Value) \!void {
+        try self.variables.put(name, value);
+    }
+    
+    pub fn get(self: Environment, name: []const u8) ?Value {
+        return self.variables.get(name);
+    }
+    
+    pub fn assign(self: *Environment, name: []const u8, value: Value) \!void {
+        if (self.variables.contains(name)) {
+            try self.variables.put(name, value);
+        } else {
+            return error.UndefinedVariable;
+        }
+    }
+};
+
+// Interpreter to evaluate expressions
+const Interpreter = struct {
+    env: *Environment,
+    
+    pub fn init(env: *Environment) Interpreter {
+        return Interpreter{ .env = env };
+    }
+    
+    // Main evaluation function
+    pub fn evaluate(self: *Interpreter, expr: Expr) \!Value {
+        switch (expr) {
+            .literal => |lit| {
+                return switch (lit) {
+                    .number => |n| Value{ .number = n },
+                    .boolean => |b| Value{ .boolean = b },
+                    .string => |s| Value{ .string = s },
+                };
+            },
+            .binary => |bin| {
+                const left = try self.evaluate(bin.left);
+                const right = try self.evaluate(bin.right);
+                
+                return try self.evaluateBinary(left, bin.operator, right);
+            },
+            .unary => |un| {
+                const right = try self.evaluate(un.right);
+                
+                return try self.evaluateUnary(un.operator, right);
+            },
+            .variable => |var_expr| {
+                if (self.env.get(var_expr.name)) |value| {
+                    return value;
+                }
+                return error.UndefinedVariable;
+            },
+            .block => |block| {
+                var result = Value{ .null_val = {} };
+                
+                for (block.statements) |statement| {
+                    result = try self.evaluate(statement);
+                }
+                
+                return result;
+            },
+            .if_expr => |if_expr| {
+                const condition = try self.evaluate(if_expr.condition);
+                
+                if (condition \!= .boolean) {
+                    return error.TypeMismatch;
+                }
+                
+                if (condition.boolean) {
+                    return try self.evaluate(if_expr.then_branch);
+                } else if (if_expr.else_branch) |else_branch| {
+                    return try self.evaluate(else_branch);
+                } else {
+                    return Value{ .null_val = {} };
+                }
+            },
+            .assignment => |assign| {
+                const value = try self.evaluate(assign.value);
+                try self.env.assign(assign.name, value);
+                return value;
+            },
+        }
+    }
+    
+    // Helper functions for evaluation
+    fn evaluateBinary(self: *Interpreter, left: Value, op: BinaryOp, right: Value) \!Value {
+        _ = self;
+        
+        // Type check for numeric operations
+        if (op == .add or op == .subtract or op == .multiply or op == .divide) {
+            if (left \!= .number or right \!= .number) {
+                return error.TypeMismatch;
+            }
+            
+            switch (op) {
+                .add => return Value{ .number = left.number + right.number },
+                .subtract => return Value{ .number = left.number - right.number },
+                .multiply => return Value{ .number = left.number * right.number },
+                .divide => {
+                    if (right.number == 0) {
+                        return error.DivisionByZero;
+                    }
+                    return Value{ .number = left.number / right.number };
+                },
+                else => unreachable,
+            }
+        }
+        
+        // Type check for comparison operations
+        if (op == .equals or op == .not_equals) {
+            // Compare based on type
+            if (@as(std.meta.Tag(Value), left) \!= @as(std.meta.Tag(Value), right)) {
+                return Value{ .boolean = false };
+            }
+            
+            switch (left) {
+                .number => {
+                    const equal = left.number == right.number;
+                    return Value{ .boolean = if (op == .equals) equal else \!equal };
+                },
+                .boolean => {
+                    const equal = left.boolean == right.boolean;
+                    return Value{ .boolean = if (op == .equals) equal else \!equal };
+                },
+                .string => {
+                    const equal = std.mem.eql(u8, left.string, right.string);
+                    return Value{ .boolean = if (op == .equals) equal else \!equal };
+                },
+                .null_val => {
+                    return Value{ .boolean = if (op == .equals) true else false };
+                },
+            }
+        }
+        
+        // Type check for comparison operations
+        if (op == .less_than or op == .greater_than) {
+            if (left \!= .number or right \!= .number) {
+                return error.TypeMismatch;
+            }
+            
+            switch (op) {
+                .less_than => return Value{ .boolean = left.number < right.number },
+                .greater_than => return Value{ .boolean = left.number > right.number },
+                else => unreachable,
+            }
+        }
+        
+        return error.InvalidOperation;
+    }
+    
+    fn evaluateUnary(self: *Interpreter, op: UnaryOp, right: Value) \!Value {
+        _ = self;
+        
+        switch (op) {
+            .negate => {
+                if (right \!= .number) {
+                    return error.TypeMismatch;
+                }
+                return Value{ .number = -right.number };
+            },
+            .not => {
+                if (right \!= .boolean) {
+                    return error.TypeMismatch;
+                }
+                return Value{ .boolean = \!right.boolean };
+            },
+        }
+    }
+};
+
+// Helper to run an example program
+fn runExample(allocator: std.mem.Allocator, program: []const Expr) \!void {
+    var env = Environment.init(allocator);
+    defer env.deinit();
+    
+    var interpreter = Interpreter.init(&env);
+    
+    // Define some initial variables
+    try env.define("pi", Value{ .number = 3.14159 });
+    try env.define("greeting", Value{ .string = "Hello, World\!" });
+    
+    // Run the program
+    std.debug.print("=== Running Example Program ===\n", .{});
+    for (program, 0..) |expr, i| {
+        std.debug.print("Expression {d}: ", .{i + 1});
+        const result = try interpreter.evaluate(expr);
+        std.debug.print("{any}\n", .{result});
+    }
+    std.debug.print("=== Program Complete ===\n", .{});
+}
+
+pub fn main() \!void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    
+    // Define a simple program
+    const program = [_]Expr{
+        // x = 10
+        Expr.assignment("x", Expr.number(10)),
+        
+        // y = 20
+        Expr.assignment("y", Expr.number(20)),
+        
+        // x + y
+        Expr.binary(Expr.variable("x"), .add, Expr.variable("y")),
+        
+        // if (x > 5) { x * 2 } else { y * 2 }
+        Expr.if_expr(
+            Expr.binary(Expr.variable("x"), .greater_than, Expr.number(5)),
+            Expr.binary(Expr.variable("x"), .multiply, Expr.number(2)),
+            Expr.binary(Expr.variable("y"), .multiply, Expr.number(2))
+        ),
+        
+        // z = pi * 2
+        Expr.assignment("z", Expr.binary(Expr.variable("pi"), .multiply, Expr.number(2))),
+        
+        // z
+        Expr.variable("z"),
+        
+        // greeting
+        Expr.variable("greeting"),
+    };
+    
+    try runExample(allocator, &program);
+}
+#+end_src
+
+*** Code Generation with Zig's Comptime
+
+Zig enables powerful code generation at compile time:
+
+#+begin_src zig :tangle ast/code_generator.zig
+const std = @import("std");
+
+// Define a struct that we want to generate code for
+const User = struct {
+    id: u64,
+    name: []const u8,
+    email: []const u8,
+    created_at: i64,
+    active: bool,
+};
+
+// Define a trait/interface that we want to implement
+const Serializable = struct {
+    pub fn serializeSignature(comptime T: type) type {
+        return fn (value: T, writer: anytype) anyerror\!void;
+    }
+    
+    pub fn deserializeSignature(comptime T: type) type {
+        return fn (reader: anytype) anyerror\!T;
+    }
+};
+
+// Generate JSON serialization code for any struct type
+fn generateJsonSerializer(comptime T: type) Serializable.serializeSignature(T) {
+    const TypeInfo = @typeInfo(T);
+    
+    return struct {
+        fn serialize(value: T, writer: anytype) \!void {
+            try writer.writeByte('{');
+            
+            inline for (TypeInfo.Struct.fields, 0..) |field, i| {
+                // Write field name
+                try writer.writeByte('"');
+                try writer.writeAll(field.name);
+                try writer.writeAll("\":");
+                
+                // Write field value based on its type
+                switch (@typeInfo(field.type)) {
+                    .Int => try writer.print("{d}", .{@field(value, field.name)}),
+                    .Float => try writer.print("{d}", .{@field(value, field.name)}),
+                    .Bool => try writer.print("{}", .{@field(value, field.name)}),
+                    .Pointer => |ptr_info| {
+                        if (ptr_info.size == .Slice && ptr_info.child == u8) {
+                            // String
+                            try writer.writeByte('"');
+                            try writer.writeAll(@field(value, field.name));
+                            try writer.writeByte('"');
+                        } else {
+                            @compileError("Unsupported pointer type for field " ++ field.name);
+                        }
+                    },
+                    else => @compileError("Unsupported type for field " ++ field.name),
+                }
+                
+                // Add comma if not the last field
+                if (i < TypeInfo.Struct.fields.len - 1) {
+                    try writer.writeByte(',');
+                }
+            }
+            
+            try writer.writeByte('}');
+        }
+    }.serialize;
+}
+
+// Generate code for a database table based on a struct
+fn generateTableDefinition(comptime T: type) []const u8 {
+    const TypeInfo = @typeInfo(T);
+    
+    comptime {
+        var buffer: [4096]u8 = undefined;
+        var fbs = std.io.fixedBufferStream(&buffer);
+        const writer = fbs.writer();
+        
+        writer.writeAll("CREATE TABLE IF NOT EXISTS ") catch unreachable;
+        writer.writeAll(@typeName(T)) catch unreachable;
+        writer.writeAll(" (\n") catch unreachable;
+        
+        inline for (TypeInfo.Struct.fields, 0..) |field, i| {
+            writer.writeAll("    ") catch unreachable;
+            writer.writeAll(field.name) catch unreachable;
+            writer.writeAll(" ") catch unreachable;
+            
+            // Map Zig types to SQL types
+            switch (@typeInfo(field.type)) {
+                .Int => {
+                    if (field.name[0] == 'i' and field.name[1] == 'd') {
+                        writer.writeAll("INTEGER PRIMARY KEY") catch unreachable;
+                    } else {
+                        writer.writeAll("INTEGER") catch unreachable;
+                    }
+                },
+                .Float => writer.writeAll("REAL") catch unreachable,
+                .Bool => writer.writeAll("BOOLEAN") catch unreachable,
+                .Pointer => |ptr_info| {
+                    if (ptr_info.size == .Slice && ptr_info.child == u8) {
+                        writer.writeAll("TEXT") catch unreachable;
+                    } else {
+                        @compileError("Unsupported pointer type for field " ++ field.name);
+                    }
+                },
+                else => @compileError("Unsupported type for field " ++ field.name),
+            }
+            
+            // Add comma if not the last field
+            if (i < TypeInfo.Struct.fields.len - 1) {
+                writer.writeAll(",\n") catch unreachable;
+            }
+        }
+        
+        writer.writeAll("\n);") catch unreachable;
+        
+        return buffer[0..fbs.pos];
+    }
+}
+
+// Generate a builder pattern for any struct
+fn generateBuilder(comptime T: type) type {
+    const TypeInfo = @typeInfo(T);
+    
+    // Create a builder struct with the same fields as the original
+    var builder_fields: [TypeInfo.Struct.fields.len]std.builtin.Type.StructField = undefined;
+    
+    inline for (TypeInfo.Struct.fields, 0..) |field, i| {
+        // Make all fields optional in the builder
+        const FieldType = if (field.type == []const u8)
+            // Pointers stay as is
+            field.type
+        else
+            // Everything else becomes optional
+            ?field.type;
+        
+        builder_fields[i] = .{
+            .name = field.name,
+            .type = FieldType,
+            .default_value = &@as(?FieldType, null),
+            .is_comptime = false,
+            .alignment = @alignOf(FieldType),
+        };
+    }
+    
+    const BuilderType = @Type(.{
+        .Struct = .{
+            .layout = .Auto,
+            .fields = &builder_fields,
+            .decls = &.{},
+            .is_tuple = false,
+        },
+    });
+    
+    return struct {
+        builder: BuilderType,
+        
+        pub fn init() @This() {
+            return .{ .builder = .{} };
+        }
+        
+        // Generate setter methods for each field
+        pub usingnamespace blk: {
+            var decls: [TypeInfo.Struct.fields.len + 1]std.builtin.Type.Declaration = undefined;
+            
+            inline for (TypeInfo.Struct.fields, 0..) |field, i| {
+                const FieldType = field.type;
+                const field_name = field.name;
+                
+                // Create setter function for this field
+                decls[i] = .{
+                    .name = field_name,
+                    .is_pub = true,
+                    .data = std.builtin.Type.Declaration.Data{
+                        .Fn = .{
+                            .fn_type = *const fn (self: *@This(), value: FieldType) *@This(),
+                            .alignment = 0,
+                        },
+                    },
+                };
+                
+                // Define the setter function
+                const Setter = struct {
+                    fn setter(self: *@This(), value: FieldType) *@This() {
+                        @field(self.builder, field_name) = value;
+                        return self;
+                    }
+                };
+                
+                @field(@This(), field_name) = Setter.setter;
+            }
+            
+            // Add the build method
+            decls[TypeInfo.Struct.fields.len] = .{
+                .name = "build",
+                .is_pub = true,
+                .data = std.builtin.Type.Declaration.Data{
+                    .Fn = .{
+                        .fn_type = *const fn (self: @This()) \!T,
+                        .alignment = 0,
+                    },
+                },
+            };
+            
+            const Namespace = @Type(.{
+                .Struct = .{
+                    .layout = .Auto,
+                    .fields = &.{},
+                    .decls = &decls,
+                    .is_tuple = false,
+                },
+            });
+            
+            break :blk Namespace;
+        },
+        
+        // The build method to create the final struct
+        pub fn build(self: @This()) \!T {
+            var result: T = undefined;
+            
+            // Check that all required fields are set
+            inline for (TypeInfo.Struct.fields) |field| {
+                const builder_value = @field(self.builder, field.name);
+                
+                if (builder_value == null and field.type \!= []const u8) {
+                    return error.MissingRequiredField;
+                }
+                
+                // Set the field in the result
+                if (field.type == []const u8) {
+                    // String type
+                    @field(result, field.name) = if (builder_value) |v| v else "";
+                } else {
+                    // Other types
+                    @field(result, field.name) = builder_value.?;
+                }
+            }
+            
+            return result;
+        }
+    };
+}
+
+pub fn main() \!void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    
+    // 1. Generate and use a JSON serializer
+    std.debug.print("=== Generated JSON Serializer ===\n", .{});
+    
+    const serializeUser = comptime generateJsonSerializer(User);
+    
+    const user = User{
+        .id = 42,
+        .name = "John Doe",
+        .email = "john@example.com",
+        .created_at = 1625097600,
+        .active = true,
+    };
+    
+    var json_buffer = std.ArrayList(u8).init(allocator);
+    defer json_buffer.deinit();
+    
+    try serializeUser(user, json_buffer.writer());
+    std.debug.print("JSON: {s}\n\n", .{json_buffer.items});
+    
+    // 2. Generate and display SQL table definition
+    std.debug.print("=== Generated SQL Table Definition ===\n", .{});
+    
+    const table_definition = comptime generateTableDefinition(User);
+    std.debug.print("{s}\n\n", .{table_definition});
+    
+    // 3. Generate and use a builder pattern
+    std.debug.print("=== Generated Builder Pattern ===\n", .{});
+    
+    const UserBuilder = comptime generateBuilder(User);
+    
+    const built_user = try UserBuilder.init()
+        .id(123)
+        .name("Jane Smith")
+        .email("jane@example.com")
+        .created_at(1625184000)
+        .active(true)
+        .build();
+    
+    std.debug.print("Built User: {any}\n", .{built_user});
+}
+#+end_src
+
+*** Building Custom Reflection Tools
+
+Zig's comptime enables powerful reflection tools:
+
+#+begin_src zig :tangle ast/reflection_tools.zig
+const std = @import("std");
+
+/// Utility to automatically generate a hash function for any struct
+fn AutoHash(comptime T: type) type {
+    return struct {
+        pub fn hash(value: T) u64 {
+            const info = @typeInfo(T);
+            
+            switch (info) {
+                .Struct => {
+                    var hasher = std.hash.Wyhash.init(0);
+                    
+                    inline for (info.Struct.fields) |field| {
+                        const field_value = @field(value, field.name);
+                        
+                        switch (@typeInfo(field.type)) {
+                            .Int, .Float => std.hash.autoHash(&hasher, field_value),
+                            .Bool => std.hash.autoHash(&hasher, @intFromBool(field_value)),
+                            .Pointer => |ptr_info| {
+                                if (ptr_info.size == .Slice and ptr_info.child == u8) {
+                                    // Hash string content
+                                    std.hash.autoHash(&hasher, std.hash.hashString(field_value));
+                                } else {
+                                    @compileError("Unsupported pointer type for field " ++ field.name);
+                                }
+                            },
+                            .Enum => std.hash.autoHash(&hasher, @intFromEnum(field_value)),
+                            .Array => |arr_info| {
+                                if (arr_info.child == u8) {
+                                    // Fixed string
+                                    std.hash.autoHash(&hasher, std.hash.hashString(&field_value));
+                                } else {
+                                    // Other arrays
+                                    for (field_value) |item| {
+                                        std.hash.autoHash(&hasher, item);
+                                    }
+                                }
+                            },
+                            else => @compileError("Unsupported type for field " ++ field.name),
+                        }
+                    }
+                    
+                    return hasher.final();
+                },
+                else => @compileError("AutoHash only works on structs, got " ++ @typeName(T)),
+            }
+        }
+        
+        pub fn eql(a: T, b: T) bool {
+            const info = @typeInfo(T);
+            
+            switch (info) {
+                .Struct => {
+                    inline for (info.Struct.fields) |field| {
+                        const a_value = @field(a, field.name);
+                        const b_value = @field(b, field.name);
+                        
+                        switch (@typeInfo(field.type)) {
+                            .Pointer => |ptr_info| {
+                                if (ptr_info.size == .Slice and ptr_info.child == u8) {
+                                    if (\!std.mem.eql(u8, a_value, b_value)) {
+                                        return false;
+                                    }
+                                } else {
+                                    @compileError("Unsupported pointer type for field " ++ field.name);
+                                }
+                            },
+                            else => {
+                                if (a_value \!= b_value) {
+                                    return false;
+                                }
+                            },
+                        }
+                    }
+                    
+                    return true;
+                },
+                else => @compileError("Eql only works on structs, got " ++ @typeName(T)),
+            }
+        }
+    };
+}
+
+/// Utility to auto-generate format function for any struct
+fn AutoFormat(comptime T: type) type {
+    return struct {
+        pub fn format(
+            value: T,
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) \!void {
+            _ = fmt;
+            _ = options;
+            
+            const info = @typeInfo(T);
+            
+            switch (info) {
+                .Struct => {
+                    try writer.writeAll(@typeName(T) ++ "{ ");
+                    
+                    inline for (info.Struct.fields, 0..) |field, i| {
+                        if (i > 0) {
+                            try writer.writeAll(", ");
+                        }
+                        
+                        try writer.writeAll(field.name ++ ": ");
+                        
+                        const field_value = @field(value, field.name);
+                        
+                        switch (@typeInfo(field.type)) {
+                            .Int => try std.fmt.format(writer, "{d}", .{field_value}),
+                            .Float => try std.fmt.format(writer, "{d}", .{field_value}),
+                            .Bool => try std.fmt.format(writer, "{}", .{field_value}),
+                            .Pointer => |ptr_info| {
+                                if (ptr_info.size == .Slice and ptr_info.child == u8) {
+                                    try std.fmt.format(writer, "\"{s}\"", .{field_value});
+                                } else {
+                                    @compileError("Unsupported pointer type for field " ++ field.name);
+                                }
+                            },
+                            .Enum => try std.fmt.format(writer, ".{s}", .{@tagName(field_value)}),
+                            .Array => |arr_info| {
+                                if (arr_info.child == u8) {
+                                    try std.fmt.format(writer, "\"{s}\"", .{&field_value});
+                                } else {
+                                    try writer.writeAll("{");
+                                    for (field_value, 0..) |item, j| {
+                                        if (j > 0) try writer.writeAll(", ");
+                                        try std.fmt.format(writer, "{any}", .{item});
+                                    }
+                                    try writer.writeAll("}");
+                                }
+                            },
+                            else => try std.fmt.format(writer, "{any}", .{field_value}),
+                        }
+                    }
+                    
+                    try writer.writeAll(" }");
+                },
+                else => @compileError("AutoFormat only works on structs, got " ++ @typeName(T)),
+            }
+        }
+    };
+}
+
+/// Utility to clone a struct deeply
+fn clone(allocator: std.mem.Allocator, value: anytype) \!@TypeOf(value) {
+    const T = @TypeOf(value);
+    const info = @typeInfo(T);
+    
+    switch (info) {
+        .Struct => {
+            var result: T = undefined;
+            
+            inline for (info.Struct.fields) |field| {
+                const field_value = @field(value, field.name);
+                const field_type = @TypeOf(field_value);
+                
+                switch (@typeInfo(field_type)) {
+                    .Pointer => |ptr_info| {
+                        if (ptr_info.size == .Slice and ptr_info.child == u8) {
+                            // Clone string
+                            const new_str = try allocator.alloc(u8, field_value.len);
+                            @memcpy(new_str, field_value);
+                            @field(result, field.name) = new_str;
+                        } else {
+                            @compileError("Unsupported pointer type for field " ++ field.name);
+                        }
+                    },
+                    .Array => |arr_info| {
+                        if (arr_info.child == u8) {
+                            // Fixed string, copy directly
+                            @field(result, field.name) = field_value;
+                        } else {
+                            // Other arrays
+                            @field(result, field.name) = field_value;
+                        }
+                    },
+                    else => @field(result, field.name) = field_value,
+                }
+            }
+            
+            return result;
+        },
+        else => @compileError("Clone only works on structs, got " ++ @typeName(T)),
+    }
+}
+
+/// Example struct for our tests
+const Person = struct {
+    id: u64,
+    name: []const u8,
+    age: u32,
+    height: f32,
+    is_active: bool,
+    favorite_colors: [3][]const u8,
+    
+    // Use our auto-generated format function
+    pub fn format(
+        self: Person,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) \!void {
+        return AutoFormat(Person).format(self, fmt, options, writer);
+    }
+    
+    // Use our auto-generated hash function
+    pub fn hash(self: Person) u64 {
+        return AutoHash(Person).hash(self);
+    }
+    
+    // Use our auto-generated equals function
+    pub fn eql(self: Person, other: Person) bool {
+        return AutoHash(Person).eql(self, other);
+    }
+};
+
+/// Generate diff between two structs of the same type
+fn diff(comptime T: type, a: T, b: T, writer: anytype) \!void {
+    const info = @typeInfo(T);
+    
+    switch (info) {
+        .Struct => {
+            var has_diff = false;
+            
+            try writer.writeAll("Changes in " ++ @typeName(T) ++ ":\n");
+            
+            inline for (info.Struct.fields) |field| {
+                const a_value = @field(a, field.name);
+                const b_value = @field(b, field.name);
+                var field_differs = false;
+                
+                switch (@typeInfo(field.type)) {
+                    .Pointer => |ptr_info| {
+                        if (ptr_info.size == .Slice and ptr_info.child == u8) {
+                            field_differs = \!std.mem.eql(u8, a_value, b_value);
+                        } else {
+                            @compileError("Unsupported pointer type for field " ++ field.name);
+                        }
+                    },
+                    else => field_differs = a_value \!= b_value,
+                }
+                
+                if (field_differs) {
+                    has_diff = true;
+                    try writer.writeAll("  " ++ field.name ++ ": ");
+                    
+                    switch (@typeInfo(field.type)) {
+                        .Int => try writer.print("{d} -> {d}\n", .{ a_value, b_value }),
+                        .Float => try writer.print("{d} -> {d}\n", .{ a_value, b_value }),
+                        .Bool => try writer.print("{} -> {}\n", .{ a_value, b_value }),
+                        .Pointer => |ptr_info| {
+                            if (ptr_info.size == .Slice and ptr_info.child == u8) {
+                                try writer.print("\"{s}\" -> \"{s}\"\n", .{ a_value, b_value });
+                            }
+                        },
+                        .Enum => try writer.print(".{s} -> .{s}\n", .{ @tagName(a_value), @tagName(b_value) }),
+                        else => try writer.print("{any} -> {any}\n", .{ a_value, b_value }),
+                    }
+                }
+            }
+            
+            if (\!has_diff) {
+                try writer.writeAll("  No differences found\n");
+            }
+        },
+        else => @compileError("Diff only works on structs, got " ++ @typeName(T)),
+    }
+}
+
+pub fn main() \!void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    
+    // Create test data
+    const colors1 = [_][]const u8{ "red", "green", "blue" };
+    const colors2 = [_][]const u8{ "purple", "green", "yellow" };
+    
+    const person1 = Person{
+        .id = 1,
+        .name = "Alice",
+        .age = 30,
+        .height = 175.5,
+        .is_active = true,
+        .favorite_colors = colors1,
+    };
+    
+    var person2 = Person{
+        .id = 1,
+        .name = "Alice Johnson",
+        .age = 31,
+        .height = 175.5,
+        .is_active = false,
+        .favorite_colors = colors2,
+    };
+    
+    // Demo auto-format
+    std.debug.print("=== Auto-Format Demo ===\n", .{});
+    std.debug.print("Person 1: {}\n", .{person1});
+    std.debug.print("Person 2: {}\n\n", .{person2});
+    
+    // Demo auto-hash
+    std.debug.print("=== Auto-Hash Demo ===\n", .{});
+    const hash1 = person1.hash();
+    const hash2 = person2.hash();
+    std.debug.print("Person 1 hash: {x}\n", .{hash1});
+    std.debug.print("Person 2 hash: {x}\n", .{hash2});
+    std.debug.print("Equal: {}\n\n", .{person1.eql(person2)});
+    
+    // Demo diff
+    std.debug.print("=== Diff Demo ===\n", .{});
+    try diff(Person, person1, person2, std.io.getStdOut().writer());
+    std.debug.print("\n", .{});
+    
+    // Demo clone
+    std.debug.print("=== Clone Demo ===\n", .{});
+    const person3 = try clone(allocator, person1);
+    std.debug.print("Original: {}\n", .{person1});
+    std.debug.print("Clone: {}\n", .{person3});
+    std.debug.print("Equal: {}\n\n", .{person1.eql(person3)});
+    
+    // Free cloned memory
+    for (person3.favorite_colors) |color| {
+        allocator.free(color);
+    }
+    allocator.free(person3.name);
+}
+#+end_src
+
+** Conclusion
+
+This tutorial has covered advanced Zig debugging techniques and AST manipulation. For staff+ engineers, understanding these concepts is essential for creating sophisticated development tools, implementing code generation systems, and debugging complex Zig applications.
+
+Key takeaways:
+
+1. Zig's debugging ecosystem includes powerful tools like LLDB, GDB, and Valgrind
+2. Memory safety issues can be detected and prevented using specialized analysis tools
+3. Comptime enables powerful metaprogramming and AST manipulation
+4. Custom code generators can be built directly into your Zig programs
+5. Reflection tools allow deep inspection and manipulation of types
+
+These techniques form the foundation for building sophisticated developer tools and systems in Zig.

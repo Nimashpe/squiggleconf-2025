@@ -1,0 +1,1452 @@
+#+TITLE: Advanced TypeScript Debugging and AST Analysis
+#+AUTHOR: SquiggleConf 2025
+#+DATE: 2025-06-18
+#+PROPERTY: header-args:typescript :results output :exports both
+
+* Introduction
+
+This tutorial explores advanced debugging techniques and Abstract Syntax Tree (AST) manipulation in TypeScript, focusing on the TypeScript Compiler API. Designed for staff+ engineers, it offers practical approaches to complex code analysis, transformation, and debugging.
+
+The TypeScript Compiler API provides powerful capabilities for:
+- Parsing and analyzing TypeScript code
+- Creating custom linting rules
+- Implementing code refactorings
+- Building language service plugins
+- Extracting type information
+
+By the end of this tutorial, you'll have a comprehensive understanding of how to leverage the TypeScript Compiler API for advanced debugging and code analysis tasks.
+
+* Prerequisites
+
+- Solid understanding of TypeScript fundamentals
+- Experience with JavaScript/TypeScript debugging
+- Node.js v18+ installed
+- TypeScript 5.0+ installed
+
+Let's set up our project:
+
+#+begin_src typescript :tangle ./src/setup.ts
+// Ensure TypeScript compiler API is installed
+// npm install typescript @types/node --save-dev
+import * as ts from 'typescript';
+import * as fs from 'fs';
+import * as path from 'path';
+
+// Check if typescript is properly installed
+console.log(`TypeScript version: ${ts.version}`);
+#+end_src
+
+* Part 1: TypeScript Compiler API Fundamentals
+
+The TypeScript Compiler API provides programmatic access to the compiler's functionality. Let's start by exploring how to parse source code into an AST.
+
+** Creating an AST from Source Code
+
+#+begin_src typescript :tangle ./src/ast_parser.ts
+import * as ts from 'typescript';
+import * as fs from 'fs';
+
+export function createAST(sourceText: string): ts.SourceFile {
+  return ts.createSourceFile(
+    'sample.ts',
+    sourceText,
+    ts.ScriptTarget.Latest,
+    /*setParentNodes*/ true
+  );
+}
+
+export function printAST(node: ts.Node, indent: string = ''): void {
+  console.log(`${indent}${ts.SyntaxKind[node.kind]} - ${node.getText()}`);
+  
+  node.forEachChild(child => {
+    printAST(child, indent + '  ');
+  });
+}
+
+// Example usage
+const sourceCode = `
+function greeting(name: string): string {
+  return \`Hello, \${name}!\`;
+}
+
+const result = greeting("TypeScript");
+`;
+
+const ast = createAST(sourceCode);
+console.log("AST Structure:");
+printAST(ast);
+#+end_src
+
+** AST Visitor Pattern
+
+The visitor pattern allows us to traverse the AST and perform operations on specific node types.
+
+#+begin_src typescript :tangle ./src/ast_visitor.ts
+import * as ts from 'typescript';
+
+export function visitNode(node: ts.Node, visitor: (node: ts.Node) => void): void {
+  visitor(node);
+  node.forEachChild(child => visitNode(child, visitor));
+}
+
+export function findFunctionDeclarations(sourceFile: ts.SourceFile): ts.FunctionDeclaration[] {
+  const functions: ts.FunctionDeclaration[] = [];
+  
+  visitNode(sourceFile, (node) => {
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      functions.push(node);
+    }
+  });
+  
+  return functions;
+}
+
+// Example of collecting information during traversal
+export function analyzeFunction(func: ts.FunctionDeclaration): {
+  name: string;
+  parameters: { name: string; type: string }[];
+  returnType: string;
+} {
+  const name = func.name?.getText() || 'anonymous';
+  const parameters = func.parameters.map(param => ({
+    name: param.name.getText(),
+    type: param.type ? param.type.getText() : 'any'
+  }));
+  
+  const returnType = func.type ? func.type.getText() : 'void';
+  
+  return { name, parameters, returnType };
+}
+
+// Example usage
+import { createAST } from './ast_parser';
+
+const sourceCode = `
+function add(a: number, b: number): number {
+  return a + b;
+}
+
+function greet(name: string): string {
+  return \`Hello \${name}!\`;
+}
+`;
+
+const ast = createAST(sourceCode);
+const functions = findFunctionDeclarations(ast);
+
+functions.forEach(func => {
+  const analysis = analyzeFunction(func);
+  console.log(`Function: ${analysis.name}`);
+  console.log(`Parameters: ${JSON.stringify(analysis.parameters)}`);
+  console.log(`Return type: ${analysis.returnType}`);
+  console.log('---');
+});
+#+end_src
+
+* Part 2: Advanced Debugging Techniques
+
+** Type Checker and Program Creation
+
+The TypeScript type checker provides rich information about types in your program.
+
+#+begin_src typescript :tangle ./src/type_checker.ts
+import * as ts from 'typescript';
+import * as path from 'path';
+import * as fs from 'fs';
+
+export function createProgram(
+  rootFiles: string[],
+  options: ts.CompilerOptions = {}
+): ts.Program {
+  return ts.createProgram(rootFiles, options);
+}
+
+export function analyzeTypes(program: ts.Program, filePath: string): void {
+  const sourceFile = program.getSourceFile(filePath);
+  
+  if (!sourceFile) {
+    console.error(`Could not find source file: ${filePath}`);
+    return;
+  }
+  
+  const typeChecker = program.getTypeChecker();
+  
+  // Visit each node and print its type information
+  function visit(node: ts.Node) {
+    if (
+      ts.isVariableDeclaration(node) || 
+      ts.isParameter(node) || 
+      ts.isPropertyDeclaration(node)
+    ) {
+      const symbol = typeChecker.getSymbolAtLocation(node.name);
+      if (symbol) {
+        const type = typeChecker.getTypeOfSymbolAtLocation(symbol, node);
+        console.log(`${node.name.getText()}: ${typeChecker.typeToString(type)}`);
+      }
+    }
+    
+    ts.forEachChild(node, visit);
+  }
+  
+  visit(sourceFile);
+}
+
+// Example: Create a temporary file to analyze
+const sampleCode = `
+interface User {
+  id: number;
+  name: string;
+  role: 'admin' | 'user';
+}
+
+class UserService {
+  private users: User[] = [];
+  
+  addUser(user: User): void {
+    this.users.push(user);
+  }
+  
+  findById(id: number): User | undefined {
+    return this.users.find(u => u.id === id);
+  }
+}
+
+const service = new UserService();
+`;
+
+const tempFilePath = path.join(__dirname, 'temp-sample.ts');
+fs.writeFileSync(tempFilePath, sampleCode);
+
+// Create program and analyze types
+const program = createProgram([tempFilePath]);
+console.log('Type information:');
+analyzeTypes(program, tempFilePath);
+
+// Clean up the temporary file
+fs.unlinkSync(tempFilePath);
+#+end_src
+
+** Diagnostic Information
+
+TypeScript's diagnostic system can be used to implement custom error reporting.
+
+#+begin_src typescript :tangle ./src/diagnostics.ts
+import * as ts from 'typescript';
+import * as path from 'path';
+
+export function reportDiagnostics(diagnostics: readonly ts.Diagnostic[]): void {
+  diagnostics.forEach(diagnostic => {
+    let message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+    
+    if (diagnostic.file && diagnostic.start !== undefined) {
+      const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+      const fileName = path.basename(diagnostic.file.fileName);
+      console.log(`${fileName} (${line + 1},${character + 1}): ${message}`);
+    } else {
+      console.log(message);
+    }
+  });
+}
+
+export function getCompilerDiagnostics(filePath: string, options: ts.CompilerOptions = {}): ts.Diagnostic[] {
+  const program = ts.createProgram([filePath], options);
+  const emitResult = program.emit();
+  
+  return [
+    ...ts.getPreEmitDiagnostics(program),
+    ...emitResult.diagnostics
+  ];
+}
+
+// Example usage with code containing errors
+import * as fs from 'fs';
+
+const errorCode = `
+// Type error: assigning number to string
+let name: string = 42;
+
+// Using undefined variable
+console.log(undefinedVar);
+
+// Function call with wrong parameter types
+function add(a: number, b: number): number {
+  return a + b;
+}
+add("hello", "world");
+`;
+
+const tempFilePath = path.join(__dirname, 'error-sample.ts');
+fs.writeFileSync(tempFilePath, errorCode);
+
+const diagnostics = getCompilerDiagnostics(tempFilePath);
+console.log('Compiler diagnostics:');
+reportDiagnostics(diagnostics);
+
+// Clean up
+fs.unlinkSync(tempFilePath);
+#+end_src
+
+** Custom Language Service Plugin
+
+Create a plugin that enhances IDE functionality:
+
+#+begin_src typescript :tangle ./src/language_service_plugin.ts
+import * as ts from 'typescript/lib/tsserverlibrary';
+
+// This would typically be in a separate .d.ts file
+declare module 'typescript/lib/tsserverlibrary' {
+  interface PluginModule {
+    create(info: ts.server.PluginCreateInfo): ts.LanguageService;
+    getExternalFiles?(project: ts.server.ConfiguredProject): string[];
+  }
+}
+
+function init(modules: { typescript: typeof ts }): ts.server.PluginModule {
+  const typescript = modules.typescript;
+  
+  function create(info: ts.server.PluginCreateInfo): ts.LanguageService {
+    // Get the existing language service
+    const languageService = info.languageService;
+    const proxy = Object.create(null);
+    
+    // Proxy most methods directly
+    for (const k of Object.keys(languageService)) {
+      (proxy as any)[k] = function() {
+        return (languageService as any)[k].apply(languageService, arguments);
+      };
+    }
+    
+    // Override getCompletionsAtPosition to add custom completions
+    proxy.getCompletionsAtPosition = function(
+      fileName: string,
+      position: number,
+      options: ts.GetCompletionsAtPositionOptions
+    ): ts.WithMetadata<ts.CompletionInfo> | undefined {
+      // Get original completions
+      const original = languageService.getCompletionsAtPosition(fileName, position, options);
+      
+      if (!original) {
+        return original;
+      }
+
+      // Add custom completions
+      const customCompletions: ts.CompletionEntry[] = [
+        {
+          name: 'customLog',
+          kind: typescript.ScriptElementKind.functionElement,
+          sortText: '0',
+          insertText: 'customLog(\'DEBUG\', $1)$0',
+          isSnippet: true,
+          source: 'Custom Plugin',
+          labelDetails: { description: 'Custom logging function' }
+        }
+      ];
+      
+      // Combine original with custom completions
+      original.entries = [...original.entries, ...customCompletions];
+      
+      return original;
+    };
+    
+    return proxy;
+  }
+  
+  return { create };
+}
+
+// Example of how to register (in tsconfig.json):
+/*
+{
+  "compilerOptions": {
+    "plugins": [
+      { "name": "my-custom-language-service-plugin" }
+    ]
+  }
+}
+*/
+
+// In a real plugin, this would be exported:
+// export = init;
+
+// For this tutorial, let's log how this would be used:
+console.log(`
+To use a language service plugin:
+
+1. Create a package that exports the init function
+2. Install the package in your project
+3. Configure in tsconfig.json:
+   {
+     "compilerOptions": {
+       "plugins": [
+         { "name": "my-custom-language-service-plugin" }
+       ]
+     }
+   }
+4. The plugin will enhance the TypeScript language service in your IDE
+`);
+#+end_src
+
+* Part 3: Code Transformation and Manipulation
+
+** AST Transformation
+
+AST transformation allows you to programmatically modify code.
+
+#+begin_src typescript :tangle ./src/ast_transformer.ts
+import * as ts from 'typescript';
+
+export function transform(
+  sourceCode: string,
+  transformers: ts.TransformerFactory<ts.SourceFile>[]
+): string {
+  const sourceFile = ts.createSourceFile(
+    'sample.ts',
+    sourceCode,
+    ts.ScriptTarget.Latest,
+    true
+  );
+  
+  const result = ts.transform(sourceFile, transformers);
+  const transformedSourceFile = result.transformed[0];
+  
+  const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
+  return printer.printFile(transformedSourceFile);
+}
+
+// Example: Transformer that converts var declarations to let
+export function createVarToLetTransformer(): ts.TransformerFactory<ts.SourceFile> {
+  return context => {
+    const visit: ts.Visitor = node => {
+      // Check if node is a var declaration
+      if (ts.isVariableDeclaration(node) && 
+          node.parent && 
+          ts.isVariableDeclarationList(node.parent) && 
+          node.parent.flags & ts.NodeFlags.Const) {
+        // Already const, no change needed
+        return node;
+      } else if (ts.isVariableDeclarationList(node) && 
+                node.flags & ts.NodeFlags.Let) {
+        // Already let, no change needed
+        return node;
+      } else if (ts.isVariableDeclarationList(node) && 
+                node.flags & ts.NodeFlags.Var) {
+        // Create a new variable declaration list with let instead of var
+        return ts.factory.updateVariableDeclarationList(
+          node,
+          node.declarations,
+          node.flags & ~ts.NodeFlags.Var | ts.NodeFlags.Let
+        );
+      }
+      
+      return ts.visitEachChild(node, visit, context);
+    };
+    
+    return sourceFile => ts.visitNode(sourceFile, visit) as ts.SourceFile;
+  };
+}
+
+// Example: Add console log statements before function calls
+export function createAddLoggingTransformer(): ts.TransformerFactory<ts.SourceFile> {
+  return context => {
+    const visit: ts.Visitor = node => {
+      // If it's a function call...
+      if (ts.isCallExpression(node) && 
+          !ts.isPropertyAccessExpression(node.expression) && // Skip method calls
+          ts.isIdentifier(node.expression)) {
+        
+        const functionName = node.expression.text;
+        // Skip if it's already a console.log call
+        if (functionName === 'console.log') {
+          return node;
+        }
+        
+        // Create a console.log statement to log the function call
+        const logStatement = ts.factory.createExpressionStatement(
+          ts.factory.createCallExpression(
+            ts.factory.createPropertyAccessExpression(
+              ts.factory.createIdentifier('console'),
+              ts.factory.createIdentifier('log')
+            ),
+            undefined,
+            [ts.factory.createStringLiteral(`Calling function: ${functionName}`)]
+          )
+        );
+        
+        // Return both statements
+        return [logStatement, node];
+      }
+      
+      return ts.visitEachChild(node, visit, context);
+    };
+    
+    return sourceFile => ts.visitNode(sourceFile, visit) as ts.SourceFile;
+  };
+}
+
+// Example usage
+const sourceCode = `
+var x = 10;
+var y = 20;
+const z = 30;
+
+function add(a, b) {
+  return a + b;
+}
+
+const result = add(x, y);
+`;
+
+console.log('Original code:');
+console.log(sourceCode);
+
+console.log('\nTransformed var to let:');
+const varToLetResult = transform(sourceCode, [createVarToLetTransformer()]);
+console.log(varToLetResult);
+
+console.log('\nAdded logging:');
+const loggingResult = transform(sourceCode, [createAddLoggingTransformer()]);
+console.log(loggingResult);
+
+console.log('\nCombined transformers:');
+const combinedResult = transform(
+  sourceCode, 
+  [createVarToLetTransformer(), createAddLoggingTransformer()]
+);
+console.log(combinedResult);
+#+end_src
+
+** Custom Code Formatter
+
+#+begin_src typescript :tangle ./src/code_formatter.ts
+import * as ts from 'typescript';
+
+export function formatCode(sourceCode: string): string {
+  // Parse the source code
+  const sourceFile = ts.createSourceFile(
+    'sample.ts',
+    sourceCode,
+    ts.ScriptTarget.Latest,
+    true
+  );
+  
+  // Create a printer with specific formatting options
+  const printer = ts.createPrinter({
+    newLine: ts.NewLineKind.LineFeed,
+    removeComments: false,
+    omitTrailingSemicolon: false,
+    noEmitHelpers: true
+  });
+  
+  // Print the file with formatting applied
+  return printer.printFile(sourceFile);
+}
+
+// Custom formatter with more specialized rules
+export function customFormat(sourceCode: string): string {
+  // First, parse the code into an AST
+  const sourceFile = ts.createSourceFile(
+    'sample.ts',
+    sourceCode,
+    ts.ScriptTarget.Latest,
+    true
+  );
+  
+  // Apply transformations to enforce specific formatting rules
+  const result = ts.transform(
+    sourceFile,
+    [
+      // Remove extra blank lines
+      context => {
+        return sourceFile => {
+          // In a real implementation, you would identify and remove
+          // excessive blank lines between statements
+          return sourceFile;
+        };
+      },
+      
+      // Standardize import statements
+      context => {
+        return sourceFile => {
+          // In a real implementation, you would sort and organize imports
+          return sourceFile;
+        };
+      }
+    ]
+  );
+  
+  // Print the transformed AST
+  const printer = ts.createPrinter({
+    newLine: ts.NewLineKind.LineFeed,
+    removeComments: false
+  });
+  
+  return printer.printFile(result.transformed[0]);
+}
+
+// Example usage
+const messyCode = `
+import   {   Component  }   from   '@angular/core'  ;
+import {Injectable} from '@angular/core';
+import {HttpClient} from '@angular/common/http';
+
+
+
+@Injectable()
+export  class  MyService {
+    constructor(private  http:  HttpClient) {}
+    
+    getData(  ) {
+        return this.http.get('api/data');
+    }
+}
+`;
+
+console.log('Original messy code:');
+console.log(messyCode);
+
+console.log('\nFormatted code:');
+console.log(formatCode(messyCode));
+#+end_src
+
+* Part 4: Building a TypeScript Debugging Tool
+
+Let's build a simple tool that combines the concepts we've learned to help debug TypeScript code.
+
+#+begin_src typescript :tangle ./src/debug_tool.ts
+import * as ts from 'typescript';
+import * as fs from 'fs';
+import * as path from 'path';
+
+export class TypeScriptDebugTool {
+  private program: ts.Program;
+  private typeChecker: ts.TypeChecker;
+  
+  constructor(rootFiles: string[], options: ts.CompilerOptions = {}) {
+    this.program = ts.createProgram(rootFiles, options);
+    this.typeChecker = this.program.getTypeChecker();
+  }
+  
+  public analyzeDependencies(filePath: string): void {
+    const sourceFile = this.program.getSourceFile(filePath);
+    if (!sourceFile) {
+      console.error(`File not found: ${filePath}`);
+      return;
+    }
+    
+    console.log(`Analyzing dependencies for ${path.basename(filePath)}:`);
+    
+    // Find all imports
+    this.findImports(sourceFile);
+  }
+  
+  public findUnusedVariables(filePath: string): void {
+    const sourceFile = this.program.getSourceFile(filePath);
+    if (!sourceFile) {
+      console.error(`File not found: ${filePath}`);
+      return;
+    }
+    
+    console.log(`Finding unused variables in ${path.basename(filePath)}:`);
+    
+    const usedIdentifiers = new Set<string>();
+    const declaredVariables = new Map<string, ts.Node>();
+    
+    // First pass: collect all declared variables
+    const collectDeclarations = (node: ts.Node) => {
+      // Variable declarations
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+        declaredVariables.set(node.name.text, node);
+      }
+      // Parameters
+      else if (ts.isParameter(node) && ts.isIdentifier(node.name)) {
+        declaredVariables.set(node.name.text, node);
+      }
+      // Function declarations
+      else if (ts.isFunctionDeclaration(node) && node.name) {
+        declaredVariables.set(node.name.text, node);
+      }
+      
+      ts.forEachChild(node, collectDeclarations);
+    };
+    
+    // Second pass: collect all used identifiers
+    const collectUsages = (node: ts.Node) => {
+      if (ts.isIdentifier(node)) {
+        // Skip property accesses (obj.prop)
+        const parent = node.parent;
+        if (ts.isPropertyAccessExpression(parent) && parent.name === node) {
+          // Do nothing, it's a property name, not a variable reference
+        } else {
+          usedIdentifiers.add(node.text);
+        }
+      }
+      
+      ts.forEachChild(node, collectUsages);
+    };
+    
+    collectDeclarations(sourceFile);
+    collectUsages(sourceFile);
+    
+    // Find unused variables
+    declaredVariables.forEach((node, name) => {
+      if (!usedIdentifiers.has(name) || 
+          (ts.isVariableDeclaration(node) && usedIdentifiers.has(name) && 
+           node.name.getText() === name)) {
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+        console.log(`Unused variable: ${name} at line ${line + 1}, column ${character + 1}`);
+      }
+    });
+  }
+  
+  public findComplexFunctions(filePath: string, threshold: number = 10): void {
+    const sourceFile = this.program.getSourceFile(filePath);
+    if (!sourceFile) {
+      console.error(`File not found: ${filePath}`);
+      return;
+    }
+    
+    console.log(`Finding complex functions in ${path.basename(filePath)}:`);
+    
+    // Visit all function-like declarations
+    const visitNode = (node: ts.Node) => {
+      if (ts.isFunctionDeclaration(node) || 
+          ts.isMethodDeclaration(node) || 
+          ts.isFunctionExpression(node) || 
+          ts.isArrowFunction(node)) {
+        
+        // Get function name (if available)
+        let functionName = 'anonymous';
+        if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) {
+          functionName = node.name ? node.name.getText() : 'anonymous';
+        }
+        
+        // Calculate cyclomatic complexity
+        const complexity = this.calculateComplexity(node);
+        
+        if (complexity > threshold) {
+          const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+          console.log(`Complex function: ${functionName} at line ${line + 1} with complexity ${complexity}`);
+        }
+      }
+      
+      ts.forEachChild(node, visitNode);
+    };
+    
+    visitNode(sourceFile);
+  }
+  
+  public instrumentCode(filePath: string, outputPath: string): void {
+    const sourceFile = this.program.getSourceFile(filePath);
+    if (!sourceFile) {
+      console.error(`File not found: ${filePath}`);
+      return;
+    }
+    
+    console.log(`Instrumenting code in ${path.basename(filePath)}:`);
+    
+    // Create a transformer to add performance measuring code
+    const transformer = this.createInstrumentingTransformer();
+    
+    // Apply the transformation
+    const result = ts.transform(sourceFile, [transformer]);
+    const transformedSourceFile = result.transformed[0];
+    
+    // Print the transformed code
+    const printer = ts.createPrinter();
+    const instrumentedCode = printer.printFile(transformedSourceFile);
+    
+    // Write to output file
+    fs.writeFileSync(outputPath, instrumentedCode);
+    console.log(`Instrumented code written to ${outputPath}`);
+  }
+  
+  private findImports(sourceFile: ts.SourceFile): void {
+    ts.forEachChild(sourceFile, node => {
+      if (ts.isImportDeclaration(node)) {
+        const importPath = node.moduleSpecifier.getText().replace(/['"]/g, '');
+        console.log(`- Import: ${importPath}`);
+        
+        // Get imported symbols
+        if (node.importClause) {
+          if (node.importClause.name) {
+            console.log(`  - Default import: ${node.importClause.name.getText()}`);
+          }
+          
+          if (node.importClause.namedBindings) {
+            if (ts.isNamedImports(node.importClause.namedBindings)) {
+              node.importClause.namedBindings.elements.forEach(element => {
+                const importedAs = element.name.getText();
+                const originalName = element.propertyName ? element.propertyName.getText() : importedAs;
+                
+                if (element.propertyName) {
+                  console.log(`  - Named import: ${originalName} as ${importedAs}`);
+                } else {
+                  console.log(`  - Named import: ${importedAs}`);
+                }
+              });
+            } else if (ts.isNamespaceImport(node.importClause.namedBindings)) {
+              console.log(`  - Namespace import: ${node.importClause.namedBindings.name.getText()}`);
+            }
+          }
+        }
+      }
+    });
+  }
+  
+  private calculateComplexity(node: ts.Node): number {
+    let complexity = 1; // Base complexity
+    
+    const visit = (node: ts.Node) => {
+      // Conditional statements increase complexity
+      if (ts.isIfStatement(node) || 
+          ts.isSwitchStatement(node) || 
+          ts.isConditionalExpression(node)) {
+        complexity++;
+      }
+      
+      // Loops increase complexity
+      if (ts.isForStatement(node) || 
+          ts.isWhileStatement(node) || 
+          ts.isDoStatement(node) || 
+          ts.isForInStatement(node) || 
+          ts.isForOfStatement(node)) {
+        complexity++;
+      }
+      
+      // Logical operators in expressions increase complexity
+      if (ts.isBinaryExpression(node)) {
+        if (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken || 
+            node.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+          complexity++;
+        }
+      }
+      
+      // Catch clauses increase complexity
+      if (ts.isCatchClause(node)) {
+        complexity++;
+      }
+      
+      ts.forEachChild(node, visit);
+    };
+    
+    visit(node);
+    return complexity;
+  }
+  
+  private createInstrumentingTransformer(): ts.TransformerFactory<ts.SourceFile> {
+    return context => {
+      const visit: ts.Visitor = node => {
+        // Add performance measurement to functions
+        if (ts.isFunctionDeclaration(node) && node.name) {
+          const functionName = node.name.getText();
+          const newBody = this.wrapWithPerformanceMeasurement(node.body, functionName);
+          
+          return ts.factory.updateFunctionDeclaration(
+            node,
+            node.decorators,
+            node.modifiers,
+            node.asteriskToken,
+            node.name,
+            node.typeParameters,
+            node.parameters,
+            node.type,
+            newBody
+          );
+        }
+        
+        // Add performance measurement to methods
+        if (ts.isMethodDeclaration(node) && node.name) {
+          const methodName = node.name.getText();
+          const newBody = this.wrapWithPerformanceMeasurement(node.body, methodName);
+          
+          return ts.factory.updateMethodDeclaration(
+            node,
+            node.decorators,
+            node.modifiers,
+            node.asteriskToken,
+            node.name,
+            node.questionToken,
+            node.typeParameters,
+            node.parameters,
+            node.type,
+            newBody
+          );
+        }
+        
+        return ts.visitEachChild(node, visit, context);
+      };
+      
+      return sourceFile => ts.visitNode(sourceFile, visit) as ts.SourceFile;
+    };
+  }
+  
+  private wrapWithPerformanceMeasurement(
+    body: ts.Block | undefined,
+    functionName: string
+  ): ts.Block | undefined {
+    if (!body) return undefined;
+    
+    // Create performance measurement statements
+    const startMeasurement = ts.factory.createVariableStatement(
+      undefined,
+      ts.factory.createVariableDeclarationList(
+        [ts.factory.createVariableDeclaration(
+          ts.factory.createIdentifier('_start'),
+          undefined,
+          undefined,
+          ts.factory.createCallExpression(
+            ts.factory.createPropertyAccessExpression(
+              ts.factory.createIdentifier('performance'),
+              ts.factory.createIdentifier('now')
+            ),
+            undefined,
+            []
+          )
+        )],
+        ts.NodeFlags.Const
+      )
+    );
+    
+    const endMeasurement = ts.factory.createExpressionStatement(
+      ts.factory.createCallExpression(
+        ts.factory.createPropertyAccessExpression(
+          ts.factory.createIdentifier('console'),
+          ts.factory.createIdentifier('log')
+        ),
+        undefined,
+        [
+          ts.factory.createTemplateExpression(
+            ts.factory.createTemplateHead(`Function ${functionName} took `),
+            [
+              ts.factory.createTemplateSpan(
+                ts.factory.createBinaryExpression(
+                  ts.factory.createCallExpression(
+                    ts.factory.createPropertyAccessExpression(
+                      ts.factory.createIdentifier('performance'),
+                      ts.factory.createIdentifier('now')
+                    ),
+                    undefined,
+                    []
+                  ),
+                  ts.factory.createToken(ts.SyntaxKind.MinusToken),
+                  ts.factory.createIdentifier('_start')
+                ),
+                ts.factory.createTemplateTail(' ms to execute')
+              )
+            ]
+          )
+        ]
+      )
+    );
+    
+    // Wrap the original body statements with measurements
+    return ts.factory.createBlock(
+      [
+        startMeasurement,
+        ...body.statements,
+        endMeasurement
+      ],
+      true
+    );
+  }
+}
+
+// Example usage (commented out to avoid creating files when tangled)
+/*
+const exampleCode = `
+import { Component } from '@angular/core';
+import * as _ from 'lodash';
+
+function complexFunction(a: number, b: number): number {
+  let result = 0;
+  
+  if (a > b) {
+    if (a > 10) {
+      result = a * 2;
+    } else {
+      result = a;
+    }
+  } else if (b > a) {
+    if (b > 20) {
+      result = b * 2;
+    } else {
+      result = b;
+    }
+  } else {
+    result = a + b;
+  }
+  
+  for (let i = 0; i < result; i++) {
+    if (i % 2 === 0) {
+      result += 1;
+    }
+  }
+  
+  return result;
+}
+
+const unused = 'This variable is never used';
+const used = 'This one is used';
+
+console.log(used);
+console.log(complexFunction(5, 10));
+`;
+
+const tempFilePath = path.join(__dirname, 'debug-example.ts');
+fs.writeFileSync(tempFilePath, exampleCode);
+
+const debugTool = new TypeScriptDebugTool([tempFilePath]);
+debugTool.analyzeDependencies(tempFilePath);
+debugTool.findUnusedVariables(tempFilePath);
+debugTool.findComplexFunctions(tempFilePath, 5);
+debugTool.instrumentCode(tempFilePath, path.join(__dirname, 'instrumented.ts'));
+
+// Clean up
+fs.unlinkSync(tempFilePath);
+*/
+
+// For the tutorial, let's show what the tool would do
+console.log(`
+TypeScript Debug Tool capabilities:
+
+1. Dependency Analysis
+   - Identifies all imports and their usage
+   - Maps dependency relationships
+
+2. Unused Variable Detection
+   - Finds declared but unused variables
+   - Reports their locations for cleanup
+
+3. Complexity Analysis
+   - Calculates cyclomatic complexity of functions
+   - Identifies functions that may need refactoring
+
+4. Code Instrumentation
+   - Adds performance measurement to functions
+   - Helps identify bottlenecks in execution
+
+To use this tool on your codebase, initialize it with:
+const debugTool = new TypeScriptDebugTool(['path/to/your/file.ts']);
+
+Then run the specific analysis methods as needed.
+`);
+#+end_src
+
+* Part 5: Practical Application: Type Analysis Tool
+
+Let's build a practical tool that analyzes TypeScript types in a codebase.
+
+#+begin_src typescript :tangle ./src/type_analyzer.ts
+import * as ts from 'typescript';
+import * as path from 'path';
+import * as fs from 'fs';
+
+export class TypeAnalyzer {
+  private program: ts.Program;
+  private typeChecker: ts.TypeChecker;
+  
+  constructor(rootFiles: string[], options: ts.CompilerOptions = {}) {
+    const defaultOptions: ts.CompilerOptions = {
+      target: ts.ScriptTarget.ES2020,
+      module: ts.ModuleKind.CommonJS,
+      strict: true,
+      ...options
+    };
+    
+    this.program = ts.createProgram(rootFiles, defaultOptions);
+    this.typeChecker = this.program.getTypeChecker();
+  }
+  
+  public analyzeTypes(filePath: string): { 
+    complexTypes: Array<{ name: string; location: string; complexity: number }>;
+    typeHierarchy: Record<string, string[]>;
+    potentialIssues: Array<{ message: string; location: string }>;
+  } {
+    const sourceFile = this.program.getSourceFile(filePath);
+    if (!sourceFile) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    
+    const result = {
+      complexTypes: [] as Array<{ name: string; location: string; complexity: number }>,
+      typeHierarchy: {} as Record<string, string[]>,
+      potentialIssues: [] as Array<{ message: string; location: string }>
+    };
+    
+    // Visit all nodes to find type declarations and expressions
+    const visit = (node: ts.Node) => {
+      // Find interfaces and type aliases
+      if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) {
+        const name = node.name.text;
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+        const location = `${path.basename(filePath)}:${line + 1}:${character + 1}`;
+        
+        // Calculate type complexity
+        const complexity = this.calculateTypeComplexity(node);
+        
+        if (complexity > 5) {
+          result.complexTypes.push({ name, location, complexity });
+        }
+        
+        // Find type hierarchy for interfaces
+        if (ts.isInterfaceDeclaration(node) && node.heritageClauses) {
+          const parents: string[] = [];
+          
+          node.heritageClauses.forEach(clause => {
+            if (clause.token === ts.SyntaxKind.ExtendsKeyword) {
+              clause.types.forEach(type => {
+                parents.push(type.expression.getText());
+              });
+            }
+          });
+          
+          if (parents.length > 0) {
+            result.typeHierarchy[name] = parents;
+          }
+        }
+      }
+      
+      // Find potential type issues
+      if (ts.isPropertyDeclaration(node) || ts.isParameterDeclaration(node) || ts.isVariableDeclaration(node)) {
+        // Check for any type
+        if (node.type && node.type.kind === ts.SyntaxKind.AnyKeyword) {
+          const name = ts.isIdentifier(node.name) ? node.name.text : 'unknown';
+          const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+          const location = `${path.basename(filePath)}:${line + 1}:${character + 1}`;
+          
+          result.potentialIssues.push({
+            message: `'${name}' is declared with type 'any'`,
+            location
+          });
+        }
+      }
+      
+      // Find type assertions that might be unsafe
+      if (ts.isAsExpression(node)) {
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+        const location = `${path.basename(filePath)}:${line + 1}:${character + 1}`;
+        
+        result.potentialIssues.push({
+          message: `Type assertion found: ${node.getText()}`,
+          location
+        });
+      }
+      
+      ts.forEachChild(node, visit);
+    };
+    
+    visit(sourceFile);
+    return result;
+  }
+  
+  public findTypeUsages(filePath: string, typeName: string): Array<{
+    usage: string;
+    location: string;
+  }> {
+    const sourceFile = this.program.getSourceFile(filePath);
+    if (!sourceFile) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    
+    const usages: Array<{ usage: string; location: string }> = [];
+    
+    const visit = (node: ts.Node) => {
+      // Check if this node references the type we're looking for
+      if (ts.isTypeReferenceNode(node) && 
+          ts.isIdentifier(node.typeName) && 
+          node.typeName.text === typeName) {
+        
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+        const location = `${path.basename(filePath)}:${line + 1}:${character + 1}`;
+        
+        usages.push({
+          usage: node.parent.getText(),
+          location
+        });
+      }
+      
+      // Check variable declarations with explicit type
+      if (ts.isVariableDeclaration(node) && 
+          node.type && 
+          ts.isTypeReferenceNode(node.type) && 
+          ts.isIdentifier(node.type.typeName) && 
+          node.type.typeName.text === typeName) {
+        
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+        const location = `${path.basename(filePath)}:${line + 1}:${character + 1}`;
+        
+        usages.push({
+          usage: node.getText(),
+          location
+        });
+      }
+      
+      // Check function parameters with explicit type
+      if (ts.isParameter(node) && 
+          node.type && 
+          ts.isTypeReferenceNode(node.type) && 
+          ts.isIdentifier(node.type.typeName) && 
+          node.type.typeName.text === typeName) {
+        
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+        const location = `${path.basename(filePath)}:${line + 1}:${character + 1}`;
+        
+        usages.push({
+          usage: node.getText(),
+          location
+        });
+      }
+      
+      ts.forEachChild(node, visit);
+    };
+    
+    visit(sourceFile);
+    return usages;
+  }
+  
+  public generateTypeGraph(filePaths: string[]): Record<string, string[]> {
+    const typeGraph: Record<string, string[]> = {};
+    
+    // Process each file
+    for (const filePath of filePaths) {
+      const sourceFile = this.program.getSourceFile(filePath);
+      if (!sourceFile) continue;
+      
+      const visit = (node: ts.Node) => {
+        // Find interfaces and their relationships
+        if (ts.isInterfaceDeclaration(node)) {
+          const interfaceName = node.name.text;
+          typeGraph[interfaceName] = [];
+          
+          // Add heritage clauses (extends)
+          if (node.heritageClauses) {
+            node.heritageClauses.forEach(clause => {
+              if (clause.token === ts.SyntaxKind.ExtendsKeyword) {
+                clause.types.forEach(type => {
+                  typeGraph[interfaceName].push(type.expression.getText());
+                });
+              }
+            });
+          }
+          
+          // Add property types
+          node.members.forEach(member => {
+            if (ts.isPropertySignature(member) && member.type) {
+              if (ts.isTypeReferenceNode(member.type) && ts.isIdentifier(member.type.typeName)) {
+                typeGraph[interfaceName].push(member.type.typeName.text);
+              }
+            }
+          });
+        }
+        
+        // Find type aliases and their relationships
+        if (ts.isTypeAliasDeclaration(node)) {
+          const typeName = node.name.text;
+          typeGraph[typeName] = [];
+          
+          const collectTypeReferences = (typeNode: ts.TypeNode) => {
+            if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+              typeGraph[typeName].push(typeNode.typeName.text);
+            } else if (ts.isUnionTypeNode(typeNode) || ts.isIntersectionTypeNode(typeNode)) {
+              typeNode.types.forEach(collectTypeReferences);
+            }
+          };
+          
+          collectTypeReferences(node.type);
+        }
+        
+        ts.forEachChild(node, visit);
+      };
+      
+      visit(sourceFile);
+    }
+    
+    return typeGraph;
+  }
+  
+  private calculateTypeComplexity(node: ts.Node): number {
+    let complexity = 1; // Base complexity
+    
+    // For interface declarations
+    if (ts.isInterfaceDeclaration(node)) {
+      // Add complexity for each member
+      complexity += node.members.length;
+      
+      // Add complexity for each heritage clause
+      if (node.heritageClauses) {
+        node.heritageClauses.forEach(clause => {
+          complexity += clause.types.length;
+        });
+      }
+      
+      // Add complexity for nested objects or arrays
+      node.members.forEach(member => {
+        if (ts.isPropertySignature(member) && member.type) {
+          if (ts.isTypeLiteralNode(member.type)) {
+            complexity += member.type.members.length;
+          } else if (ts.isArrayTypeNode(member.type)) {
+            complexity += 1;
+          }
+        }
+      });
+    }
+    
+    // For type aliases
+    if (ts.isTypeAliasDeclaration(node)) {
+      const addTypeComplexity = (typeNode: ts.TypeNode): number => {
+        let typeComplexity = 0;
+        
+        if (ts.isUnionTypeNode(typeNode) || ts.isIntersectionTypeNode(typeNode)) {
+          typeComplexity += typeNode.types.length;
+          typeNode.types.forEach(type => {
+            typeComplexity += addTypeComplexity(type);
+          });
+        } else if (ts.isTypeLiteralNode(typeNode)) {
+          typeComplexity += typeNode.members.length;
+        } else if (ts.isMappedTypeNode(typeNode)) {
+          typeComplexity += 3; // Mapped types are inherently complex
+        } else if (ts.isConditionalTypeNode(typeNode)) {
+          typeComplexity += 3; // Conditional types are inherently complex
+        }
+        
+        return typeComplexity;
+      };
+      
+      complexity += addTypeComplexity(node.type);
+    }
+    
+    return complexity;
+  }
+}
+
+// Example usage
+const exampleCode = `
+interface BaseEntity {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface User extends BaseEntity {
+  username: string;
+  email: string;
+  profile: {
+    firstName: string;
+    lastName: string;
+    avatarUrl?: string;
+  };
+  roles: string[];
+}
+
+interface Product extends BaseEntity {
+  name: string;
+  price: number;
+  category: ProductCategory;
+}
+
+interface ProductCategory {
+  id: string;
+  name: string;
+  parentCategory?: ProductCategory;
+}
+
+type ProductResponse = {
+  product: Product;
+  relatedProducts: Product[];
+  category: ProductCategory;
+};
+
+type EntityMap<T extends BaseEntity> = {
+  [id: string]: T;
+};
+
+// Some examples of usage
+function processUser(user: User): void {
+  console.log(user.username);
+  const name = \`\${user.profile.firstName} \${user.profile.lastName}\`;
+  console.log(name);
+}
+
+const productMap: EntityMap<Product> = {};
+
+function addProduct(product: Product): void {
+  productMap[product.id] = product;
+}
+
+// Some potential issues
+const anyValue: any = { prop: 'value' };
+const forcedProduct = anyValue as Product;
+`;
+
+const tempFilePath = path.join(__dirname, 'type-analyzer-example.ts');
+fs.writeFileSync(tempFilePath, exampleCode);
+
+const analyzer = new TypeAnalyzer([tempFilePath]);
+
+console.log('Type Analysis Results:');
+const analysis = analyzer.analyzeTypes(tempFilePath);
+
+console.log('\nComplex Types:');
+analysis.complexTypes.forEach(type => {
+  console.log(`- ${type.name} (complexity: ${type.complexity}) at ${type.location}`);
+});
+
+console.log('\nType Hierarchy:');
+Object.entries(analysis.typeHierarchy).forEach(([type, parents]) => {
+  console.log(`- ${type} extends ${parents.join(', ')}`);
+});
+
+console.log('\nPotential Issues:');
+analysis.potentialIssues.forEach(issue => {
+  console.log(`- ${issue.message} at ${issue.location}`);
+});
+
+console.log('\nType Usages (Product):');
+const usages = analyzer.findTypeUsages(tempFilePath, 'Product');
+usages.forEach(usage => {
+  console.log(`- ${usage.usage} at ${usage.location}`);
+});
+
+console.log('\nType Graph:');
+const graph = analyzer.generateTypeGraph([tempFilePath]);
+Object.entries(graph).forEach(([type, dependencies]) => {
+  if (dependencies.length > 0) {
+    console.log(`- ${type} depends on: ${dependencies.join(', ')}`);
+  } else {
+    console.log(`- ${type} (no dependencies)`);
+  }
+});
+
+// Clean up
+fs.unlinkSync(tempFilePath);
+#+end_src
+
+* Conclusion
+
+This tutorial has provided a comprehensive exploration of TypeScript's debugging capabilities and AST manipulation using the Compiler API. We've covered:
+
+1. Parsing TypeScript code into Abstract Syntax Trees
+2. Traversing and analyzing AST nodes
+3. Retrieving type information using the TypeScript type checker
+4. Creating code transformations for automated refactoring
+5. Building custom diagnostic tools for code analysis
+6. Implementing language service plugins for IDE integration
+7. Developing a practical type analysis tool
+
+These techniques enable developers to build sophisticated tooling for:
+- Advanced static analysis
+- Custom linting rules
+- Automated code refactoring
+- Performance optimization through instrumentation
+- Type safety verification
+- Codebase visualization
+
+By mastering these concepts, you can create powerful developer tools that improve code quality, enhance developer productivity, and ensure robust type safety in your TypeScript projects.
+
+* Resources
+
+- [TypeScript Compiler API Documentation](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API)
+- [TypeScript AST Viewer](https://ts-ast-viewer.com/)
+- [TypeScript Handbook: Advanced Types](https://www.typescriptlang.org/docs/handbook/advanced-types.html)
+- [TypeScript Deep Dive by Basarat Ali Syed](https://basarat.gitbook.io/typescript/)
+- [TypeScript ESLint Project](https://github.com/typescript-eslint/typescript-eslint)

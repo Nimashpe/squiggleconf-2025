@@ -1,0 +1,1888 @@
+#+TITLE: Advanced Rust Debugging & AST Analysis
+#+AUTHOR: SquiggleConf 2025 Team
+#+DATE: <2025-06-18 Wed>
+#+STARTUP: overview
+#+PROPERTY: header-args:rust :results output
+
+* Rust Debugging & AST Analysis for Staff+ Engineers
+
+This tutorial provides in-depth coverage of advanced Rust debugging techniques and Abstract Syntax Tree (AST) manipulation for building sophisticated developer tools and language extensions.
+
+** Prerequisites
+
+- Strong understanding of Rust fundamentals
+- Familiarity with Rust's ownership model and borrow checker
+- Rust toolchain installed (rustc, cargo, rustup)
+- Experience with basic debugging techniques
+
+Let's set up our environment:
+
+#+begin_src rust :tangle setup.rs
+// Check Rust version and required components
+fn main() {
+    println!("Rust version: {}", rustc_version());
+    println!("Checking for required components...");
+    
+    // Check for rust-analyzer
+    if let Some(version) = rust_analyzer_version() {
+        println!("rust-analyzer: {}", version);
+    } else {
+        println!("rust-analyzer: Not found. Install with 'rustup component add rust-analyzer'.");
+    }
+    
+    // Check for lldb or gdb
+    if let Some(version) = lldb_version() {
+        println!("LLDB: {}", version);
+    } else if let Some(version) = gdb_version() {
+        println!("GDB: {}", version);
+    } else {
+        println!("Neither LLDB nor GDB found. Install one for better debugging experience.");
+    }
+    
+    // Check for syn and quote crates
+    println!("\nRequired crates for AST manipulation:");
+    println!("Add these to your Cargo.toml:");
+    println!("syn = {{ version = \"2.0\", features = [\"full\", \"extra-traits\"] }}");
+    println!("quote = \"2.0\"");
+    println!("proc-macro2 = \"1.0\"");
+}
+
+// Helper functions to get version information
+fn rustc_version() -> String {
+    let output = std::process::Command::new("rustc")
+        .arg("--version")
+        .output()
+        .expect("Failed to execute rustc");
+    
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn rust_analyzer_version() -> Option<String> {
+    let output = std::process::Command::new("rust-analyzer")
+        .arg("--version")
+        .output();
+    
+    if let Ok(output) = output {
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
+fn lldb_version() -> Option<String> {
+    let output = std::process::Command::new("lldb")
+        .arg("--version")
+        .output();
+    
+    if let Ok(output) = output {
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
+fn gdb_version() -> Option<String> {
+    let output = std::process::Command::new("gdb")
+        .arg("--version")
+        .output();
+    
+    if let Ok(output) = output {
+        let version = String::from_utf8_lossy(&output.stdout);
+        Some(version.lines().next().unwrap_or("").trim().to_string())
+    } else {
+        None
+    }
+}
+#+end_src
+
+** Advanced Debugging Techniques
+
+*** Using LLDB and GDB with Rust
+
+Rust works well with both LLDB and GDB debuggers. Here's a sample program to demonstrate debugging capabilities:
+
+#+begin_src rust :tangle debugging/debug_sample.rs
+#[derive(Debug)]
+struct User {
+    id: u64,
+    name: String,
+    email: String,
+    active: bool,
+}
+
+impl User {
+    fn new(id: u64, name: &str, email: &str) -> Self {
+        User {
+            id,
+            name: name.to_string(),
+            email: email.to_string(),
+            active: true,
+        }
+    }
+    
+    fn deactivate(&mut self) {
+        self.active = false;
+    }
+}
+
+// A function with a bug for debugging practice
+fn find_user_by_id(users: &[User], id: u64) -> Option<&User> {
+    // Bug: Off-by-one error in the loop bound
+    for i in 0..users.len() - 1 { // Should be just users.len()
+        if users[i].id == id {
+            return Some(&users[i]);
+        }
+    }
+    None
+}
+
+// A function with memory safety issues for demonstration
+fn unsafe_example() {
+    let mut data = vec![1, 2, 3, 4, 5];
+    
+    unsafe {
+        // Get a raw pointer to the data
+        let ptr = data.as_mut_ptr();
+        
+        // Modify values through the pointer
+        for i in 0..data.len() {
+            *ptr.add(i) = i as i32 * 10;
+        }
+        
+        // Potential undefined behavior for demonstration:
+        // Uncommenting this would access out of bounds memory
+        // *ptr.add(data.len()) = 100;
+    }
+    
+    println!("Modified data: {:?}", data);
+}
+
+fn main() {
+    // Create a collection of users
+    let mut users = vec![
+        User::new(1, "Alice", "alice@example.com"),
+        User::new(2, "Bob", "bob@example.com"),
+        User::new(3, "Charlie", "charlie@example.com"),
+        User::new(4, "Diana", "diana@example.com"),
+    ];
+    
+    // Deactivate one user
+    if let Some(user) = users.get_mut(1) {
+        user.deactivate();
+    }
+    
+    // Attempt to find users - the last one will fail due to the bug
+    let found_user1 = find_user_by_id(&users, 1);
+    let found_user2 = find_user_by_id(&users, 2);
+    let found_user4 = find_user_by_id(&users, 4); // This will fail due to the bug
+    
+    println!("User 1: {:?}", found_user1);
+    println!("User 2: {:?}", found_user2);
+    println!("User 4: {:?}", found_user4); // Will print None due to the bug
+    
+    // Demonstrate unsafe code for debugging
+    unsafe_example();
+    
+    // Heap allocation and memory usage example
+    let mut big_vec = Vec::with_capacity(1000);
+    for i in 0..1000 {
+        big_vec.push(i * i);
+    }
+    
+    println!("Vector size: {}", big_vec.len());
+    println!("Vector capacity: {}", big_vec.capacity());
+    
+    // Trigger a potential memory leak for demonstration
+    std::mem::forget(big_vec);
+}
+#+end_src
+
+*** LLDB Debugging Guide
+
+Here's a sample LLDB debugging session for Rust:
+
+#+begin_src bash :tangle debugging/lldb_session.sh
+#!/bin/bash
+# Script demonstrating LLDB debugging commands for Rust
+
+# Build with debug symbols
+cargo build --bin debug_sample
+
+echo "=== LLDB Debugging Session for Rust ==="
+echo "Starting debugging session...\n"
+
+cat << 'EOF'
+# Start LLDB with the compiled binary
+lldb target/debug/debug_sample
+
+# Set breakpoints
+breakpoint set --name main
+breakpoint set --name find_user_by_id
+
+# Run the program
+run
+
+# Continue to the next breakpoint
+continue
+
+# Examine arguments and local variables
+frame variable
+
+# Show the source code context
+source list
+
+# Step through code
+step
+
+# Step over functions
+next
+
+# Print expressions
+expression users.len()
+expression users[0].name
+
+# Check memory addresses and raw pointers
+expression &users[0]
+expression --raw-output -- users.as_ptr()
+
+# Examine Rust smart pointers
+expression --dynamic-type true -- users
+
+# Create a watchpoint for a variable
+watchpoint set variable users[0].active
+
+# Continue with watchpoint set
+continue
+
+# Show backtrace
+bt
+
+# Switch to a different frame
+frame select 1
+
+# Examine Rust types
+type summary show --summary-string "${var.id}: ${var.name}" User
+
+# Show User instances with custom summary
+frame variable --show-types users
+
+# Exit debugger
+quit
+EOF
+
+echo "\nTo run the full debugging session, execute:"
+echo "lldb target/debug/debug_sample"
+#+end_src
+
+*** Memory Analysis with Valgrind and MIRI
+
+Memory issues in Rust can be detected using Valgrind and the Miri interpreter:
+
+#+begin_src rust :tangle debugging/memory_issues.rs
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
+
+// Structure for demonstrating memory leaks
+struct Node {
+    value: i32,
+    // Potential circular reference causing memory leak
+    children: Vec<Rc<RefCell<Node>>>,
+    // Using raw pointer for demonstration
+    unsafe_ptr: Option<*mut i32>,
+}
+
+impl Node {
+    fn new(value: i32) -> Self {
+        Node {
+            value,
+            children: Vec::new(),
+            unsafe_ptr: None,
+        }
+    }
+    
+    fn add_child(&mut self, child: Rc<RefCell<Node>>) {
+        self.children.push(child);
+    }
+    
+    // Unsafe method for demonstration
+    unsafe fn set_unsafe_ptr(&mut self, ptr: *mut i32) {
+        self.unsafe_ptr = Some(ptr);
+    }
+    
+    // Potentially dangerous operation
+    unsafe fn modify_through_ptr(&self) {
+        if let Some(ptr) = self.unsafe_ptr {
+            *ptr += 10;
+        }
+    }
+}
+
+// Function with a use-after-free bug
+fn use_after_free_example() {
+    let mut data = Box::new(42);
+    let data_ptr = &mut *data as *mut i32;
+    
+    // Use the data
+    println!("Data value: {}", *data);
+    
+    // Drop the Box, freeing the memory
+    drop(data);
+    
+    // Attempt to use the freed memory (undefined behavior)
+    unsafe {
+        // This line would cause a use-after-free if uncommented
+        // println!("After free: {}", *data_ptr);
+    }
+}
+
+// Function with potential memory leak
+fn create_circular_reference() -> Rc<RefCell<Node>> {
+    let node1 = Rc::new(RefCell::new(Node::new(1)));
+    let node2 = Rc::new(RefCell::new(Node::new(2)));
+    
+    // Create circular reference
+    node1.borrow_mut().add_child(Rc::clone(&node2));
+    node2.borrow_mut().add_child(Rc::clone(&node1));
+    
+    // Return node1, but node2 is also kept alive due to circular reference
+    node1
+}
+
+// Function with a double-free issue
+fn double_free_example() {
+    unsafe {
+        // Allocate memory
+        let ptr = Box::into_raw(Box::new(5));
+        
+        // Use the memory
+        println!("Value: {}", *ptr);
+        
+        // Free it once properly
+        let _ = Box::from_raw(ptr);
+        
+        // Uncommenting would cause a double-free error
+        // let _ = Box::from_raw(ptr);
+    }
+}
+
+// Function with iterator invalidation
+fn iterator_invalidation() {
+    let mut numbers = vec![1, 2, 3, 4, 5];
+    
+    // Safe way to modify while iterating
+    for i in 0..numbers.len() {
+        if numbers[i] % 2 == 0 {
+            numbers[i] *= 2;
+        }
+    }
+    
+    println!("Safe modification: {:?}", numbers);
+    
+    // Unsafe modification that would invalidate iterators if uncommented
+    /*
+    let mut iter = numbers.iter_mut();
+    while let Some(num) = iter.next() {
+        if *num > 3 {
+            numbers.push(*num * 2); // This would invalidate the iterator
+        }
+    }
+    */
+}
+
+fn main() {
+    // Memory leak example
+    let _leaked_ref = create_circular_reference();
+    println!("Created circular reference");
+    
+    // Use after free example (commented out to prevent UB)
+    use_after_free_example();
+    
+    // Double free example (partially commented out to prevent UB)
+    double_free_example();
+    
+    // Iterator invalidation example
+    iterator_invalidation();
+    
+    // Unsafe pointer example
+    let mut value = 42;
+    let mut node = Node::new(100);
+    
+    unsafe {
+        node.set_unsafe_ptr(&mut value);
+        println!("Before modification: {}", value);
+        node.modify_through_ptr();
+        println!("After modification: {}", value);
+    }
+    
+    // Example of leaking memory with HashMap
+    let mut cache = HashMap::new();
+    for i in 0..1000 {
+        let key = format!("key_{}", i);
+        let value = vec![0; 1024]; // 1KB of data
+        cache.insert(key, value);
+    }
+    
+    println!("Cache size: {}", cache.len());
+    
+    // To demonstrate memory leaks, we'll just forget about the cache
+    std::mem::forget(cache);
+    
+    println!("Memory analysis complete");
+}
+#+end_src
+
+*** Valgrind and MIRI Commands
+
+#+begin_src bash :tangle debugging/memory_analysis.sh
+#!/bin/bash
+# Script demonstrating memory analysis tools for Rust
+
+# Build with debug symbols
+cargo build --bin memory_issues
+
+echo "=== Memory Analysis for Rust Programs ==="
+
+# Check if Valgrind is installed
+if command -v valgrind &> /dev/null; then
+    echo "\n== Running Valgrind for memory leak detection =="
+    valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./target/debug/memory_issues
+else
+    echo "Valgrind not found. Install with 'sudo apt-get install valgrind' on Ubuntu/Debian"
+fi
+
+# Check if we can use Miri
+echo "\n== Setting up Miri (Rust's memory issue detector) =="
+echo "Run these commands to install and use Miri:"
+
+cat << 'EOF'
+# Install Miri
+rustup +nightly component add miri
+
+# Run the Miri interpreter
+cargo +nightly miri run
+
+# Run Miri with specific flags for better detection
+cargo +nightly miri run -- -Zmiri-tag-raw-pointers -Zmiri-check-number-validity
+
+# Run tests with Miri
+cargo +nightly miri test
+
+# Common Miri errors and their meanings:
+# - "dangling pointer" or "null pointer dereference": Attempting to access invalid memory
+# - "no item at offset": Accessing outside of allocated memory bounds
+# - "not grounded": Using a pointer derived from a freed allocation
+# - "created from unrelated allocation": Pointer arithmetic leading outside the allocation
+# - "no longer exists": Use-after-free
+EOF
+
+echo "\n== Memory analysis tools comparison =="
+echo "1. Valgrind: Detects memory leaks, use-after-free, invalid memory accesses"
+echo "2. Miri: Detects undefined behavior in Rust code, including memory issues"
+echo "3. ASAN (Address Sanitizer): Fast memory error detector"
+
+cat << 'EOF'
+# To use ASAN with Rust:
+rustup component add rust-src
+CFLAGS="-fsanitize=address" cargo run -Zbuild-std --target x86_64-unknown-linux-gnu
+EOF
+
+echo "\n== Tools for analyzing heap allocations =="
+echo "Dhat: Heap profiling tool included with Valgrind"
+
+cat << 'EOF'
+# To use Dhat:
+valgrind --tool=dhat ./target/debug/memory_issues
+EOF
+
+echo "\nMemory analysis instructions complete"
+#+end_src
+
+*** Debugging Asynchronous Rust
+
+Debugging async Rust code requires special techniques:
+
+#+begin_src rust :tangle debugging/async_debug.rs
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use std::fmt;
+
+// A simple logger for tracing async execution
+struct AsyncLogger {
+    log: Arc<Mutex<Vec<String>>>,
+}
+
+impl AsyncLogger {
+    fn new() -> Self {
+        AsyncLogger {
+            log: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+    
+    fn log(&self, message: &str) {
+        let mut log = self.log.lock().unwrap();
+        log.push(format!("{}: {}", chrono::Local::now().format("%H:%M:%S.%3f"), message));
+    }
+    
+    fn dump_log(&self) {
+        let log = self.log.lock().unwrap();
+        println!("=== Async Execution Log ===");
+        for entry in log.iter() {
+            println!("{}", entry);
+        }
+        println!("===========================");
+    }
+    
+    fn clone(&self) -> Self {
+        AsyncLogger {
+            log: Arc::clone(&self.log),
+        }
+    }
+}
+
+// Custom future wrapper for debugging
+struct DebugFuture<F> {
+    inner: F,
+    name: &'static str,
+    logger: AsyncLogger,
+}
+
+impl<F> DebugFuture<F> {
+    fn new(future: F, name: &'static str, logger: AsyncLogger) -> Self {
+        DebugFuture {
+            inner: future,
+            name,
+            logger,
+        }
+    }
+}
+
+impl<F: std::future::Future> std::future::Future for DebugFuture<F> {
+    type Output = F::Output;
+    
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        // Safety: we're not moving any fields out of self
+        let this = unsafe { self.get_unchecked_mut() };
+        this.logger.log(&format!("Polling future '{}'", this.name));
+        
+        // Safety: we're not moving the inner future out of self
+        let inner = unsafe { std::pin::Pin::new_unchecked(&mut this.inner) };
+        match inner.poll(cx) {
+            std::task::Poll::Ready(result) => {
+                this.logger.log(&format!("Future '{}' completed", this.name));
+                std::task::Poll::Ready(result)
+            },
+            std::task::Poll::Pending => {
+                this.logger.log(&format!("Future '{}' pending", this.name));
+                std::task::Poll::Pending
+            }
+        }
+    }
+}
+
+// Helper function to create a debuggable future
+fn debug_future<F: std::future::Future>(future: F, name: &'static str, logger: AsyncLogger) -> DebugFuture<F> {
+    DebugFuture::new(future, name, logger)
+}
+
+// Simulated async tasks
+async fn fetch_data(id: u32, logger: AsyncLogger) -> Result<String, &'static str> {
+    logger.log(&format!("Starting fetch_data({})", id));
+    
+    // Simulate network delay
+    tokio::time::sleep(Duration::from_millis(id * 100)).await;
+    
+    // Simulate occasional failure
+    if id % 5 == 0 {
+        logger.log(&format!("fetch_data({}) failed", id));
+        return Err("Data fetch failed");
+    }
+    
+    logger.log(&format!("fetch_data({}) succeeded", id));
+    Ok(format!("Data for id {}", id))
+}
+
+async fn process_data(data: String, logger: AsyncLogger) -> String {
+    logger.log(&format!("Starting process_data({})", data));
+    
+    // Simulate processing time
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    
+    let result = format!("Processed: {}", data);
+    logger.log(&format!("Finished process_data: {}", result));
+    result
+}
+
+// Task with a bug (deadlock potential)
+async fn buggy_task(shared_data: Arc<Mutex<Vec<u32>>>, logger: AsyncLogger) {
+    logger.log("Starting buggy_task");
+    
+    // Lock the mutex
+    let mut data = shared_data.lock().unwrap();
+    logger.log("Acquired lock in buggy_task");
+    
+    // This await while holding the lock could cause deadlocks in a real app
+    // since we're holding the lock across an await point
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    
+    data.push(42);
+    logger.log("Updated shared data and releasing lock");
+    // Lock is automatically released when data goes out of scope
+}
+
+// Correct task (doesn't hold lock across await points)
+async fn correct_task(shared_data: Arc<Mutex<Vec<u32>>>, logger: AsyncLogger) {
+    logger.log("Starting correct_task");
+    
+    // Do async work before acquiring the lock
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    
+    // Acquire lock only when needed and release immediately
+    {
+        let mut data = shared_data.lock().unwrap();
+        logger.log("Acquired lock in correct_task");
+        data.push(100);
+        logger.log("Updated shared data and releasing lock");
+    } // Lock is released here
+    
+    // Continue with more async work if needed
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    logger.log("Completed correct_task");
+}
+
+#[tokio::main]
+async fn main() {
+    let logger = AsyncLogger::new();
+    logger.log("Starting async debugging demo");
+    
+    // 1. Basic async task debugging
+    let fetch_future = debug_future(
+        fetch_data(42, logger.clone()),
+        "fetch_data",
+        logger.clone()
+    );
+    
+    let result = fetch_future.await;
+    match result {
+        Ok(data) => {
+            logger.log(&format!("Successfully fetched data: {}", data));
+            
+            let process_future = debug_future(
+                process_data(data, logger.clone()),
+                "process_data",
+                logger.clone()
+            );
+            
+            let processed = process_future.await;
+            logger.log(&format!("Final result: {}", processed));
+        },
+        Err(e) => logger.log(&format!("Error fetching data: {}", e)),
+    }
+    
+    // 2. Multiple concurrent tasks
+    logger.log("Starting concurrent tasks");
+    
+    let shared_data = Arc::new(Mutex::new(Vec::new()));
+    
+    let task1 = tokio::spawn(buggy_task(Arc::clone(&shared_data), logger.clone()));
+    let task2 = tokio::spawn(correct_task(Arc::clone(&shared_data), logger.clone()));
+    
+    // Wait for both tasks to complete
+    let _ = tokio::join!(task1, task2);
+    
+    // Check final state
+    let data = shared_data.lock().unwrap();
+    logger.log(&format!("Final shared data: {:?}", *data));
+    
+    // 3. Race condition demonstration with tokio tasks
+    let counter = Arc::new(Mutex::new(0));
+    let mut handles = Vec::new();
+    
+    for i in 0..5 {
+        let counter_clone = Arc::clone(&counter);
+        let logger_clone = logger.clone();
+        let handle = tokio::spawn(async move {
+            logger_clone.log(&format!("Task {} starting", i));
+            
+            // Simulate some async work
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            
+            // Update the counter (correctly with a mutex)
+            let mut count = counter_clone.lock().unwrap();
+            *count += 1;
+            logger_clone.log(&format!("Task {} incremented counter to {}", i, *count));
+        });
+        
+        handles.push(handle);
+    }
+    
+    // Wait for all tasks to complete
+    for handle in handles {
+        let _ = handle.await;
+    }
+    
+    // Final counter value
+    let final_count = *counter.lock().unwrap();
+    logger.log(&format!("Final counter value: {}", final_count));
+    
+    // Dump the execution log
+    logger.dump_log();
+}
+#+end_src
+
+** Rust AST Analysis with syn and quote
+
+Rust's procedural macros provide powerful tools for AST manipulation.
+
+*** Parsing Rust Code with syn
+
+#+begin_src rust :tangle ast/syn_parser.rs
+use syn::{parse_file, File, ItemFn, Item, visit::Visit};
+use std::fs::File as FsFile;
+use std::io::Read;
+use std::path::Path;
+
+// Visitor struct for analyzing Rust AST
+struct RustCodeVisitor {
+    fn_count: usize,
+    struct_count: usize,
+    enum_count: usize,
+    trait_count: usize,
+    impl_count: usize,
+    macro_count: usize,
+}
+
+impl RustCodeVisitor {
+    fn new() -> Self {
+        RustCodeVisitor {
+            fn_count: 0,
+            struct_count: 0,
+            enum_count: 0,
+            trait_count: 0,
+            impl_count: 0,
+            macro_count: 0,
+        }
+    }
+    
+    fn print_stats(&self) {
+        println!("=== Rust Code Statistics ===");
+        println!("Functions: {}", self.fn_count);
+        println!("Structs:   {}", self.struct_count);
+        println!("Enums:     {}", self.enum_count);
+        println!("Traits:    {}", self.trait_count);
+        println!("Impls:     {}", self.impl_count);
+        println!("Macros:    {}", self.macro_count);
+        println!("===========================");
+    }
+}
+
+impl<'ast> Visit<'ast> for RustCodeVisitor {
+    fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+        self.fn_count += 1;
+        // Continue visiting the function body
+        syn::visit::visit_item_fn(self, node);
+    }
+    
+    fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
+        self.struct_count += 1;
+        syn::visit::visit_item_struct(self, node);
+    }
+    
+    fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
+        self.enum_count += 1;
+        syn::visit::visit_item_enum(self, node);
+    }
+    
+    fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
+        self.trait_count += 1;
+        syn::visit::visit_item_trait(self, node);
+    }
+    
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        self.impl_count += 1;
+        syn::visit::visit_item_impl(self, node);
+    }
+    
+    fn visit_macro(&mut self, node: &'ast syn::Macro) {
+        self.macro_count += 1;
+        syn::visit::visit_macro(self, node);
+    }
+}
+
+// Function analyzer that focuses on function details
+struct FunctionAnalyzer {
+    functions: Vec<FunctionInfo>,
+}
+
+struct FunctionInfo {
+    name: String,
+    args: Vec<(String, String)>, // (name, type)
+    return_type: Option<String>,
+    is_async: bool,
+    is_unsafe: bool,
+    is_public: bool,
+    line_count: usize,
+}
+
+impl FunctionAnalyzer {
+    fn new() -> Self {
+        FunctionAnalyzer {
+            functions: Vec::new(),
+        }
+    }
+    
+    fn analyze_function(&mut self, func: &ItemFn) {
+        let name = func.sig.ident.to_string();
+        
+        // Extract arguments
+        let mut args = Vec::new();
+        for input in &func.sig.inputs {
+            if let syn::FnArg::Typed(pat_type) = input {
+                let arg_name = match &*pat_type.pat {
+                    syn::Pat::Ident(pat_ident) => pat_ident.ident.to_string(),
+                    _ => "_".to_string(),
+                };
+                
+                let arg_type = match &*pat_type.ty {
+                    syn::Type::Path(type_path) => {
+                        format!("{}", quote::quote!(#type_path))
+                    },
+                    _ => "unknown".to_string(),
+                };
+                
+                args.push((arg_name, arg_type));
+            }
+        }
+        
+        // Extract return type
+        let return_type = if let syn::ReturnType::Type(_, ty) = &func.sig.output {
+            Some(format!("{}", quote::quote!(#ty)))
+        } else {
+            None
+        };
+        
+        // Function properties
+        let is_async = func.sig.asyncness.is_some();
+        let is_unsafe = func.sig.unsafety.is_some();
+        let is_public = if let Some(vis) = &func.vis {
+            matches!(vis, syn::Visibility::Public(_))
+        } else {
+            false
+        };
+        
+        // Estimate line count from span information
+        // This is approximate since we don't have line info without full parsing context
+        let line_count = func.block.stmts.len();
+        
+        self.functions.push(FunctionInfo {
+            name,
+            args,
+            return_type,
+            is_async,
+            is_unsafe,
+            is_public,
+            line_count,
+        });
+    }
+    
+    fn print_function_analysis(&self) {
+        println!("=== Function Analysis ===");
+        for func in &self.functions {
+            println!("Function: {}", func.name);
+            println!("  Public: {}", func.is_public);
+            println!("  Async: {}", func.is_async);
+            println!("  Unsafe: {}", func.is_unsafe);
+            
+            println!("  Arguments:");
+            for (name, ty) in &func.args {
+                println!("    {}: {}", name, ty);
+            }
+            
+            if let Some(ret) = &func.return_type {
+                println!("  Return type: {}", ret);
+            } else {
+                println!("  Return type: ()");
+            }
+            
+            println!("  Approximate size: {} statements", func.line_count);
+            println!();
+        }
+    }
+}
+
+fn analyze_rust_file(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    // Read the file
+    let mut file = FsFile::open(path)?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)?;
+    
+    // Parse the file into an AST
+    let syntax = parse_file(&content)?;
+    
+    // Analyze the AST
+    let mut visitor = RustCodeVisitor::new();
+    syn::visit::visit_file(&mut visitor, &syntax);
+    visitor.print_stats();
+    
+    // Analyze functions
+    let mut fn_analyzer = FunctionAnalyzer::new();
+    
+    // Extract functions
+    for item in &syntax.items {
+        if let Item::Fn(func) = item {
+            fn_analyzer.analyze_function(func);
+        }
+    }
+    
+    fn_analyzer.print_function_analysis();
+    
+    Ok(())
+}
+
+fn main() {
+    // Example usage with this file
+    let path = Path::new("ast/syn_parser.rs");
+    
+    match analyze_rust_file(path) {
+        Ok(_) => println!("Analysis complete"),
+        Err(e) => eprintln!("Error analyzing file: {}", e),
+    }
+}
+#+end_src
+
+*** Creating a Custom Derive Macro
+
+#+begin_src rust :tangle ast/custom_derive.rs
+// Note: This would typically be in a separate crate
+use proc_macro2::{Span, TokenStream};
+use quote::{quote, format_ident};
+use syn::{parse_macro_input, Data, DeriveInput, Fields};
+
+// Custom derive macro for generating common methods for structs
+fn derive_common_methods(input: DeriveInput) -> TokenStream {
+    let name = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    
+    // Generate methods based on struct fields
+    let methods = match input.data {
+        Data::Struct(ref data) => {
+            match data.fields {
+                Fields::Named(ref fields) => {
+                    let field_methods = fields.named.iter().map(|field| {
+                        let field_name = field.ident.as_ref().unwrap();
+                        let field_type = &field.ty;
+                        
+                        // Generate a getter method
+                        let getter_name = field_name.clone();
+                        
+                        // Generate a setter method
+                        let setter_name = format_ident!("set_{}", field_name);
+                        
+                        quote! {
+                            // Getter
+                            pub fn #getter_name(&self) -> &#field_type {
+                                &self.#field_name
+                            }
+                            
+                            // Setter
+                            pub fn #setter_name(&mut self, value: #field_type) -> &mut Self {
+                                self.#field_name = value;
+                                self
+                            }
+                        }
+                    });
+                    
+                    // Collect all the field methods
+                    quote! {
+                        #(#field_methods)*
+                    }
+                },
+                Fields::Unnamed(_) => {
+                    // Tuple structs not supported in this example
+                    quote! {}
+                },
+                Fields::Unit => {
+                    // Unit structs don't have fields
+                    quote! {}
+                },
+            }
+        },
+        _ => {
+            // Only structs are supported
+            quote! {}
+        },
+    };
+    
+    // Generate a new method if it's a named struct
+    let new_method = match input.data {
+        Data::Struct(ref data) => {
+            match data.fields {
+                Fields::Named(ref fields) => {
+                    let params = fields.named.iter().map(|field| {
+                        let field_name = field.ident.as_ref().unwrap();
+                        let field_type = &field.ty;
+                        quote! { #field_name: #field_type }
+                    });
+                    
+                    let field_inits = fields.named.iter().map(|field| {
+                        let field_name = field.ident.as_ref().unwrap();
+                        quote! { #field_name }
+                    });
+                    
+                    quote! {
+                        pub fn new(#(#params),*) -> Self {
+                            Self {
+                                #(#field_inits),*
+                            }
+                        }
+                    }
+                },
+                _ => quote! {},
+            }
+        },
+        _ => quote! {},
+    };
+    
+    // Generate clone_into method
+    let clone_fields = match input.data {
+        Data::Struct(ref data) => {
+            match data.fields {
+                Fields::Named(ref fields) => {
+                    let field_clones = fields.named.iter().map(|field| {
+                        let field_name = field.ident.as_ref().unwrap();
+                        quote! { #field_name: self.#field_name.clone() }
+                    });
+                    
+                    quote! {
+                        #(#field_clones),*
+                    }
+                },
+                _ => quote! {},
+            }
+        },
+        _ => quote! {},
+    };
+    
+    let clone_method = quote! {
+        pub fn clone_into(&self) -> Self {
+            Self {
+                #clone_fields
+            }
+        }
+    };
+    
+    // Generate implementation
+    let expanded = quote! {
+        impl #impl_generics #name #ty_generics #where_clause {
+            // Constructor
+            #new_method
+            
+            // Field accessors
+            #methods
+            
+            // Clone method
+            #clone_method
+        }
+    };
+    
+    expanded
+}
+
+// This would be the proc_macro attribute in a real derive macro
+// #[proc_macro_derive(CommonMethods)]
+// pub fn derive_common_methods(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+//     let input = parse_macro_input!(input as DeriveInput);
+//     derive_common_methods(input).into()
+// }
+
+fn main() {
+    // Example struct definition
+    let input = r#"
+        struct User {
+            id: u64,
+            name: String,
+            email: String,
+            active: bool,
+        }
+    "#;
+    
+    // Parse the struct definition
+    let derive_input = syn::parse_str::<DeriveInput>(input).unwrap();
+    
+    // Generate the implementation
+    let generated = derive_common_methods(derive_input);
+    
+    // Print the generated code
+    println!("// Generated implementation\n{}", generated);
+}
+#+end_src
+
+*** AST Transformer
+
+#+begin_src rust :tangle ast/ast_transformer.rs
+use syn::{parse_file, parse_str, visit_mut::VisitMut, File, Item, ItemFn, Expr, Stmt};
+use quote::quote;
+use proc_macro2::TokenStream;
+
+// AST Transformer for modifying Rust code
+struct RustTransformer {
+    // Transformation settings
+    add_logging: bool,
+    make_async: bool,
+    rename_functions: bool,
+}
+
+impl RustTransformer {
+    fn new() -> Self {
+        RustTransformer {
+            add_logging: true,
+            make_async: false,
+            rename_functions: false,
+        }
+    }
+    
+    // Generate a log statement for function entry
+    fn create_log_statement(&self, fn_name: &str) -> Stmt {
+        let log_msg = format!("Entering function: {}", fn_name);
+        let log_expr: Expr = parse_str(&format!("println!(\"{}\")", log_msg)).unwrap();
+        parse_str::<Stmt>(&format!("println!(\"{}\")", log_msg)).unwrap()
+    }
+}
+
+impl VisitMut for RustTransformer {
+    // Transform functions
+    fn visit_item_fn_mut(&mut self, node: &mut ItemFn) {
+        // Add logging at the beginning of each function
+        if self.add_logging {
+            let fn_name = node.sig.ident.to_string();
+            let log_stmt = self.create_log_statement(&fn_name);
+            node.block.stmts.insert(0, log_stmt);
+        }
+        
+        // Make functions async if requested
+        if self.make_async && node.sig.asyncness.is_none() {
+            node.sig.asyncness = Some(syn::token::Async::default());
+        }
+        
+        // Rename functions if requested (adding a prefix)
+        if self.rename_functions {
+            let old_name = node.sig.ident.to_string();
+            let new_name = format!("transformed_{}", old_name);
+            node.sig.ident = syn::Ident::new(&new_name, proc_macro2::Span::call_site());
+        }
+        
+        // Continue visiting child nodes
+        syn::visit_mut::visit_item_fn_mut(self, node);
+    }
+}
+
+fn transform_rust_code(code: &str) -> String {
+    // Parse the code into an AST
+    let mut syntax: File = parse_str(code).expect("Failed to parse Rust code");
+    
+    // Create and apply the transformer
+    let mut transformer = RustTransformer::new();
+    transformer.visit_file_mut(&mut syntax);
+    
+    // Convert the modified AST back to code
+    let ts = quote!(#syntax);
+    ts.to_string()
+}
+
+fn main() {
+    // Example Rust code to transform
+    let original_code = r#"
+    fn calculate_sum(a: i32, b: i32) -> i32 {
+        a + b
+    }
+    
+    fn greet(name: &str) -> String {
+        format!("Hello, {}!", name)
+    }
+    "#;
+    
+    println!("Original Code:\n{}", original_code);
+    
+    let transformed = transform_rust_code(original_code);
+    println!("\nTransformed Code:\n{}", transformed);
+}
+#+end_src
+
+*** Building a Procedural Macro
+
+#+begin_src rust :tangle ast/proc_macro_demo.rs
+// Note: This would typically be in a separate proc-macro crate
+use proc_macro2::TokenStream;
+use quote::{quote, ToTokens};
+use syn::{parse_macro_input, ItemFn, AttributeArgs, NestedMeta, Lit, Meta};
+
+// Procedural macro for adding retry logic to functions
+fn retry_macro(args: AttributeArgs, input: ItemFn) -> TokenStream {
+    // Parse macro arguments
+    let mut max_retries = 3; // Default
+    let mut delay_ms = 100;  // Default
+    
+    for arg in args {
+        match arg {
+            NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("retries") => {
+                if let Lit::Int(lit) = nv.lit {
+                    max_retries = lit.base10_parse().unwrap_or(3);
+                }
+            },
+            NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("delay") => {
+                if let Lit::Int(lit) = nv.lit {
+                    delay_ms = lit.base10_parse().unwrap_or(100);
+                }
+            },
+            _ => {},
+        }
+    }
+    
+    // Get function details
+    let fn_vis = &input.vis;
+    let fn_sig = &input.sig;
+    let fn_block = &input.block;
+    let fn_name = &fn_sig.ident;
+    let fn_generics = &fn_sig.generics;
+    let fn_inputs = &fn_sig.inputs;
+    let fn_output = &fn_sig.output;
+    
+    // Extract argument names for the function call
+    let args = fn_inputs.iter().map(|arg| {
+        match arg {
+            syn::FnArg::Typed(pat_type) => {
+                if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                    let ident = &pat_ident.ident;
+                    quote! { #ident }
+                } else {
+                    quote! { /* unable to extract argument name */ }
+                }
+            },
+            syn::FnArg::Receiver(_) => quote! { self },
+        }
+    });
+    
+    // Generate the wrapped function
+    let is_async = fn_sig.asyncness.is_some();
+    
+    let function_call = if is_async {
+        quote! { #fn_name(#(#args),*).await }
+    } else {
+        quote! { #fn_name(#(#args),*) }
+    };
+    
+    // Original function with renamed
+    let original_fn_name = syn::Ident::new(
+        &format!("__original_{}", fn_name),
+        proc_macro2::Span::call_site()
+    );
+    
+    let original_fn = quote! {
+        #fn_vis fn #original_fn_name #fn_generics(#fn_inputs) #fn_output #fn_block
+    };
+    
+    // Generate retry wrapper function
+    let wrapper_fn = if is_async {
+        quote! {
+            #fn_vis async fn #fn_name #fn_generics(#fn_inputs) #fn_output {
+                use std::time::Duration;
+                let mut attempts = 0;
+                loop {
+                    attempts += 1;
+                    match #original_fn_name(#(#args),*).await {
+                        Ok(result) => return Ok(result),
+                        Err(e) => {
+                            if attempts >= #max_retries {
+                                return Err(e);
+                            }
+                            eprintln!("Attempt {} failed, retrying in {} ms: {:?}", 
+                                     attempts, #delay_ms, e);
+                            tokio::time::sleep(Duration::from_millis(#delay_ms)).await;
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        quote! {
+            #fn_vis fn #fn_name #fn_generics(#fn_inputs) #fn_output {
+                use std::thread::sleep;
+                use std::time::Duration;
+                let mut attempts = 0;
+                loop {
+                    attempts += 1;
+                    match #original_fn_name(#(#args),*) {
+                        Ok(result) => return Ok(result),
+                        Err(e) => {
+                            if attempts >= #max_retries {
+                                return Err(e);
+                            }
+                            eprintln!("Attempt {} failed, retrying in {} ms: {:?}", 
+                                     attempts, #delay_ms, e);
+                            sleep(Duration::from_millis(#delay_ms));
+                        }
+                    }
+                }
+            }
+        }
+    };
+    
+    // Combine original and wrapper functions
+    quote! {
+        #original_fn
+        
+        #wrapper_fn
+    }
+}
+
+// This would be the actual proc macro in a real macro crate
+// #[proc_macro_attribute]
+// pub fn retry(args: proc_macro::TokenStream, input: proc_macro::TokenStream) 
+//     -> proc_macro::TokenStream {
+//     let args = parse_macro_input!(args as AttributeArgs);
+//     let input = parse_macro_input!(input as ItemFn);
+//     retry_macro(args, input).into()
+// }
+
+fn main() {
+    // Example function to transform
+    let input_code = r#"
+    #[retry(retries = 5, delay = 200)]
+    async fn fetch_data(url: &str) -> Result<String, reqwest::Error> {
+        let response = reqwest::get(url).await?;
+        let text = response.text().await?;
+        Ok(text)
+    }
+    "#;
+    
+    // In a real proc macro, we'd parse the input_code and transform it
+    // For demonstration, we'll just show what we're generating
+    println!("A proc macro that would transform:\n{}", input_code);
+    
+    // Mock the transformation process
+    let mock_fn = syn::parse_str::<ItemFn>(r#"
+    async fn fetch_data(url: &str) -> Result<String, reqwest::Error> {
+        let response = reqwest::get(url).await?;
+        let text = response.text().await?;
+        Ok(text)
+    }
+    "#).unwrap();
+    
+    let mock_args = syn::parse_str::<AttributeArgs>("retries = 5, delay = 200").unwrap_or_default();
+    
+    let transformed = retry_macro(mock_args, mock_fn);
+    println!("\nInto:\n{}", transformed);
+}
+#+end_src
+
+*** Creating a Custom Linter with Clippy
+
+#+begin_src rust :tangle ast/custom_linter.rs
+use syn::{parse_file, Item, ItemFn, Expr, ExprMatch, Pat, Arm};
+use syn::visit::{self, Visit};
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+
+// Linting rule struct
+struct LintRule {
+    name: String,
+    description: String,
+    check_fn: fn(&syn::File) -> Vec<LintError>,
+}
+
+// Error reported by a lint rule
+struct LintError {
+    message: String,
+    line: usize,
+    column: usize,
+    rule_name: String,
+}
+
+impl LintError {
+    fn new(message: String, rule_name: &str) -> Self {
+        LintError {
+            message,
+            line: 0,  // Would be populated from span in a real implementation
+            column: 0, // Would be populated from span in a real implementation
+            rule_name: rule_name.to_string(),
+        }
+    }
+}
+
+// Custom linter implementation
+struct RustLinter {
+    rules: Vec<LintRule>,
+}
+
+impl RustLinter {
+    fn new() -> Self {
+        // Create a linter with default rules
+        let mut linter = RustLinter {
+            rules: Vec::new(),
+        };
+        
+        // Add default rules
+        linter.add_rule(LintRule {
+            name: "exhaustive_match".to_string(),
+            description: "Checks for non-exhaustive match expressions".to_string(),
+            check_fn: check_exhaustive_match,
+        });
+        
+        linter.add_rule(LintRule {
+            name: "unwrap_used".to_string(),
+            description: "Detects usage of unwrap() which might panic".to_string(),
+            check_fn: check_unwrap_usage,
+        });
+        
+        linter.add_rule(LintRule {
+            name: "complex_function".to_string(),
+            description: "Identifies functions that are too large or complex".to_string(),
+            check_fn: check_complex_functions,
+        });
+        
+        linter
+    }
+    
+    fn add_rule(&mut self, rule: LintRule) {
+        self.rules.push(rule);
+    }
+    
+    fn lint_file(&self, path: &Path) -> Result<Vec<LintError>, Box<dyn std::error::Error>> {
+        // Read the file
+        let mut file = File::open(path)?;
+        let mut content = String::new();
+        file.read_to_string(&mut content)?;
+        
+        // Parse the file
+        let syntax = parse_file(&content)?;
+        
+        // Apply all rules
+        let mut errors = Vec::new();
+        for rule in &self.rules {
+            let rule_errors = (rule.check_fn)(&syntax);
+            errors.extend(rule_errors);
+        }
+        
+        Ok(errors)
+    }
+}
+
+// Rule implementation: Check for non-exhaustive match expressions
+fn check_exhaustive_match(file: &syn::File) -> Vec<LintError> {
+    struct MatchVisitor {
+        errors: Vec<LintError>,
+    }
+    
+    impl<'ast> Visit<'ast> for MatchVisitor {
+        fn visit_expr_match(&mut self, node: &'ast ExprMatch) {
+            // Check if the match has a wildcard pattern
+            let has_wildcard = node.arms.iter().any(|arm| {
+                matches!(arm.pat, Pat::Wild(_))
+            });
+            
+            // If it doesn't have a wildcard, it might not be exhaustive
+            if !has_wildcard {
+                self.errors.push(LintError::new(
+                    "Match expression might not be exhaustive. Consider adding a wildcard '_' pattern".to_string(),
+                    "exhaustive_match"
+                ));
+            }
+            
+            // Continue visiting
+            visit::visit_expr_match(self, node);
+        }
+    }
+    
+    let mut visitor = MatchVisitor { errors: Vec::new() };
+    visitor.visit_file(file);
+    visitor.errors
+}
+
+// Rule implementation: Check for unwrap() usage
+fn check_unwrap_usage(file: &syn::File) -> Vec<LintError> {
+    struct UnwrapVisitor {
+        errors: Vec<LintError>,
+    }
+    
+    impl<'ast> Visit<'ast> for UnwrapVisitor {
+        fn visit_expr(&mut self, node: &'ast Expr) {
+            // Look for method calls
+            if let Expr::MethodCall(method_call) = node {
+                // Check if method name is unwrap
+                if method_call.method == "unwrap" {
+                    self.errors.push(LintError::new(
+                        "Use of unwrap() detected. Consider using ? or match/if let for error handling".to_string(),
+                        "unwrap_used"
+                    ));
+                }
+            }
+            
+            // Continue visiting
+            visit::visit_expr(self, node);
+        }
+    }
+    
+    let mut visitor = UnwrapVisitor { errors: Vec::new() };
+    visitor.visit_file(file);
+    visitor.errors
+}
+
+// Rule implementation: Check for complex functions
+fn check_complex_functions(file: &syn::File) -> Vec<LintError> {
+    struct ComplexityVisitor {
+        errors: Vec<LintError>,
+    }
+    
+    impl<'ast> Visit<'ast> for ComplexityVisitor {
+        fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+            // Simple complexity metric: count statements
+            let stmt_count = node.block.stmts.len();
+            
+            // If function has too many statements, report it
+            if stmt_count > 20 {  // Arbitrary threshold
+                self.errors.push(LintError::new(
+                    format!("Function '{}' has {} statements, which exceeds the recommended maximum of 20", 
+                            node.sig.ident, stmt_count),
+                    "complex_function"
+                ));
+            }
+            
+            // Continue visiting
+            visit::visit_item_fn(self, node);
+        }
+    }
+    
+    let mut visitor = ComplexityVisitor { errors: Vec::new() };
+    visitor.visit_file(file);
+    visitor.errors
+}
+
+fn main() {
+    // Example Rust code to lint
+    let example_code = r#"
+    fn process_data(data: Option<String>) -> String {
+        // Using unwrap which might panic
+        let value = data.unwrap();
+        
+        // Non-exhaustive match
+        let result = match value.as_str() {
+            "hello" => "world",
+            "goodbye" => "friend",
+            // Missing wildcard case
+        };
+        
+        result.to_string()
+    }
+    
+    fn very_complex_function() {
+        let mut sum = 0;
+        
+        // Lots of statements to trigger complexity warning
+        for i in 0..100 {
+            sum += i;
+        }
+        println!("Step 1");
+        println!("Step 2");
+        println!("Step 3");
+        println!("Step 4");
+        println!("Step 5");
+        println!("Step 6");
+        println!("Step 7");
+        println!("Step 8");
+        println!("Step 9");
+        println!("Step 10");
+        println!("Step 11");
+        println!("Step 12");
+        println!("Step 13");
+        println!("Step 14");
+        println!("Step 15");
+        println!("Final sum: {}", sum);
+    }
+    "#;
+    
+    // Write to a temporary file for linting
+    let temp_file = "temp_lint_example.rs";
+    std::fs::write(temp_file, example_code).expect("Failed to write temporary file");
+    
+    // Create a linter and run it
+    let linter = RustLinter::new();
+    let path = Path::new(temp_file);
+    
+    match linter.lint_file(path) {
+        Ok(errors) => {
+            println!("Found {} lint issues:", errors.len());
+            for error in errors {
+                println!("[{}] {}", error.rule_name, error.message);
+            }
+        },
+        Err(e) => eprintln!("Error linting file: {}", e),
+    }
+    
+    // Clean up
+    std::fs::remove_file(temp_file).expect("Failed to remove temporary file");
+}
+#+end_src
+
+*** Code Generation with quote
+
+#+begin_src rust :tangle ast/code_generator.rs
+use proc_macro2::{Span, TokenStream};
+use quote::{quote, format_ident};
+use syn::{parse_str, ItemStruct, Fields, FieldsNamed, Field, Type, Visibility, Ident};
+
+// Generate a simple DTO (Data Transfer Object) struct
+fn generate_dto(name: &str, fields: Vec<(&str, &str)>) -> TokenStream {
+    // Create struct identifier
+    let struct_ident = Ident::new(name, Span::call_site());
+    
+    // Create fields
+    let fields = fields.iter().map(|(name, ty)| {
+        let field_ident = Ident::new(name, Span::call_site());
+        let field_type = parse_str::<Type>(ty).unwrap();
+        
+        quote! {
+            pub #field_ident: #field_type
+        }
+    });
+    
+    // Generate the struct
+    quote! {
+        #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+        pub struct #struct_ident {
+            #(#fields),*
+        }
+    }
+}
+
+// Generate From implementation between two structs
+fn generate_from_impl(from_type: &str, to_type: &str, field_mappings: Vec<(&str, &str)>) -> TokenStream {
+    let from_ident = Ident::new(from_type, Span::call_site());
+    let to_ident = Ident::new(to_type, Span::call_site());
+    
+    let field_conversions = field_mappings.iter().map(|(from_field, to_field)| {
+        let from_field_ident = Ident::new(from_field, Span::call_site());
+        let to_field_ident = Ident::new(to_field, Span::call_site());
+        
+        quote! {
+            #to_field_ident: from.#from_field_ident
+        }
+    });
+    
+    quote! {
+        impl From<#from_ident> for #to_ident {
+            fn from(from: #from_ident) -> Self {
+                Self {
+                    #(#field_conversions),*
+                }
+            }
+        }
+    }
+}
+
+// Generate a CRUD service for a type
+fn generate_service(entity_type: &str) -> TokenStream {
+    let entity_ident = Ident::new(entity_type, Span::call_site());
+    let service_ident = format_ident!("{}{}", entity_type, "Service");
+    let repository_ident = format_ident!("{}{}", entity_type, "Repository");
+    
+    quote! {
+        pub struct #service_ident {
+            repository: #repository_ident,
+        }
+        
+        impl #service_ident {
+            pub fn new(repository: #repository_ident) -> Self {
+                Self { repository }
+            }
+            
+            pub async fn find_all(&self) -> Result<Vec<#entity_ident>, Error> {
+                self.repository.find_all().await
+            }
+            
+            pub async fn find_by_id(&self, id: uuid::Uuid) -> Result<Option<#entity_ident>, Error> {
+                self.repository.find_by_id(id).await
+            }
+            
+            pub async fn create(&self, entity: #entity_ident) -> Result<#entity_ident, Error> {
+                self.repository.save(entity).await
+            }
+            
+            pub async fn update(&self, entity: #entity_ident) -> Result<#entity_ident, Error> {
+                self.repository.save(entity).await
+            }
+            
+            pub async fn delete(&self, id: uuid::Uuid) -> Result<(), Error> {
+                self.repository.delete(id).await
+            }
+        }
+    }
+}
+
+// Generate a complete application structure
+fn generate_app_structure(entity_types: Vec<&str>) -> TokenStream {
+    let entity_modules = entity_types.iter().map(|entity| {
+        let entity_ident = Ident::new(&entity.to_lowercase(), Span::call_site());
+        let entity_type_ident = Ident::new(entity, Span::call_site());
+        let service_ident = format_ident!("{}{}", entity, "Service");
+        let repository_ident = format_ident!("{}{}", entity, "Repository");
+        let controller_ident = format_ident!("{}{}", entity, "Controller");
+        
+        quote! {
+            pub mod #entity_ident {
+                use super::*;
+                
+                pub mod model {
+                    use serde::{Serialize, Deserialize};
+                    
+                    #[derive(Debug, Clone, Serialize, Deserialize)]
+                    pub struct #entity_type_ident {
+                        pub id: uuid::Uuid,
+                        pub created_at: chrono::DateTime<chrono::Utc>,
+                        pub updated_at: chrono::DateTime<chrono::Utc>,
+                        // Other fields would be here
+                    }
+                }
+                
+                pub mod repository {
+                    use super::model::#entity_type_ident;
+                    use async_trait::async_trait;
+                    
+                    #[async_trait]
+                    pub trait #repository_ident {
+                        async fn find_all(&self) -> Result<Vec<#entity_type_ident>, Error>;
+                        async fn find_by_id(&self, id: uuid::Uuid) -> Result<Option<#entity_type_ident>, Error>;
+                        async fn save(&self, entity: #entity_type_ident) -> Result<#entity_type_ident, Error>;
+                        async fn delete(&self, id: uuid::Uuid) -> Result<(), Error>;
+                    }
+                }
+                
+                pub mod service {
+                    use super::model::#entity_type_ident;
+                    use super::repository::#repository_ident;
+                    
+                    pub struct #service_ident {
+                        repository: Box<dyn #repository_ident + Send + Sync>,
+                    }
+                    
+                    impl #service_ident {
+                        pub fn new(repository: Box<dyn #repository_ident + Send + Sync>) -> Self {
+                            Self { repository }
+                        }
+                        
+                        pub async fn find_all(&self) -> Result<Vec<#entity_type_ident>, Error> {
+                            self.repository.find_all().await
+                        }
+                        
+                        // Other methods would be here
+                    }
+                }
+                
+                pub mod controller {
+                    use super::model::#entity_type_ident;
+                    use super::service::#service_ident;
+                    use actix_web::{web, HttpResponse, Responder};
+                    
+                    pub struct #controller_ident {
+                        service: #service_ident,
+                    }
+                    
+                    impl #controller_ident {
+                        pub fn new(service: #service_ident) -> Self {
+                            Self { service }
+                        }
+                        
+                        pub async fn get_all(&self) -> impl Responder {
+                            match self.service.find_all().await {
+                                Ok(entities) => HttpResponse::Ok().json(entities),
+                                Err(_) => HttpResponse::InternalServerError().finish(),
+                            }
+                        }
+                        
+                        // Other handler methods would be here
+                    }
+                    
+                    pub fn configure(cfg: &mut web::ServiceConfig, controller: #controller_ident) {
+                        cfg.service(
+                            web::resource(concat!("/", stringify!(#entity_ident), "s"))
+                                .route(web::get().to(move || controller.get_all()))
+                        );
+                    }
+                }
+            }
+        }
+    });
+    
+    let app_config = entity_types.iter().map(|entity| {
+        let entity_ident = Ident::new(&entity.to_lowercase(), Span::call_site());
+        let controller_ident = format_ident!("{}{}", entity, "Controller");
+        
+        quote! {
+            #entity_ident::controller::configure(cfg, #entity_ident::controller::#controller_ident::new(
+                #entity_ident::service::#entity_type_ident::new(
+                    Box::new(/* repository implementation */)
+                )
+            ));
+        }
+    });
+    
+    quote! {
+        use std::error::Error;
+        use uuid::Uuid;
+        use chrono::{DateTime, Utc};
+        use serde::{Serialize, Deserialize};
+        
+        #(#entity_modules)*
+        
+        pub fn configure_app(cfg: &mut actix_web::web::ServiceConfig) {
+            #(#app_config)*
+        }
+    }
+}
+
+fn main() {
+    // Example 1: Generate a DTO
+    let user_dto = generate_dto("UserDto", vec![
+        ("id", "uuid::Uuid"),
+        ("username", "String"),
+        ("email", "String"),
+        ("created_at", "chrono::DateTime<chrono::Utc>"),
+    ]);
+    
+    println!("=== Generated DTO ===\n{}", user_dto);
+    
+    // Example 2: Generate From implementation
+    let from_impl = generate_from_impl("User", "UserDto", vec![
+        ("id", "id"),
+        ("username", "username"),
+        ("email", "email"),
+        ("created_at", "created_at"),
+    ]);
+    
+    println!("\n=== Generated From Implementation ===\n{}", from_impl);
+    
+    // Example 3: Generate a service
+    let user_service = generate_service("User");
+    
+    println!("\n=== Generated Service ===\n{}", user_service);
+    
+    // Example 4: Generate a complete app structure
+    let app_structure = generate_app_structure(vec!["User", "Product", "Order"]);
+    
+    println!("\n=== Generated App Structure ===\n{}", app_structure);
+}
+#+end_src
+
+** Conclusion
+
+This tutorial has covered advanced Rust debugging techniques and AST manipulation. For staff+ engineers, understanding these concepts is essential for creating sophisticated development tools, implementing code generation systems, and debugging complex Rust applications.
+
+Key takeaways:
+
+1. Rust's debugging ecosystem includes powerful tools like LLDB, GDB, Valgrind, and MIRI
+2. Memory safety issues can be detected and prevented using specialized analysis tools
+3. Procedural macros enable powerful metaprogramming capabilities
+4. The syn and quote crates provide robust AST manipulation capabilities
+5. Custom linters and code generators can improve development productivity and code quality
+
+These techniques form the foundation for building sophisticated developer tools and systems in Rust.

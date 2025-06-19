@@ -1,0 +1,2090 @@
+#+TITLE: Advanced Go Debugging & AST Analysis
+#+AUTHOR: SquiggleConf 2025 Team
+#+DATE: <2025-06-18 Wed>
+#+STARTUP: overview
+#+PROPERTY: header-args:go :results output
+
+* Go Debugging & AST Analysis for Staff+ Engineers
+
+This tutorial provides in-depth coverage of advanced Go debugging techniques and Abstract Syntax Tree (AST) manipulation for building developer tools.
+
+** Advanced Debugging with Delve
+
+Delve is the de facto debugger for Go applications, with advanced features beyond standard debuggers.
+
+*** Installation and Setup
+
+#+begin_src go :tangle debugging/install_delve.go
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
+)
+
+func main() {
+	fmt.Println("=== Installing Delve Debugger ===")
+	
+	// Check Go version first
+	cmd := exec.Command("go", "version")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to check Go version: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Using %s\n", string(output))
+	
+	// Install Delve
+	fmt.Println("\nInstalling Delve debugger...")
+	var installCmd *exec.Cmd
+	
+	switch runtime.GOOS {
+	case "darwin":
+		installCmd = exec.Command("go", "install", "github.com/go-delve/delve/cmd/dlv@latest")
+	case "linux", "freebsd":
+		installCmd = exec.Command("go", "install", "github.com/go-delve/delve/cmd/dlv@latest")
+	case "windows":
+		installCmd = exec.Command("go", "install", "github.com/go-delve/delve/cmd/dlv@latest")
+	default:
+		fmt.Fprintf(os.Stderr, "Unsupported operating system: %s\n", runtime.GOOS)
+		os.Exit(1)
+	}
+	
+	output, err = installCmd.CombinedOutput()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to install Delve: %v\n%s\n", err, string(output))
+		fmt.Println("\nAlternative installation:")
+		fmt.Println("- Clone: git clone https://github.com/go-delve/delve")
+		fmt.Println("- Build: cd delve && go install github.com/go-delve/delve/cmd/dlv")
+		os.Exit(1)
+	}
+	
+	fmt.Println("Delve installed successfully.")
+	fmt.Println("\nVerify installation by running: dlv version")
+	fmt.Println("\nUsage:")
+	fmt.Println("- Debug package: dlv debug github.com/example/pkg")
+	fmt.Println("- Attach to process: dlv attach <pid>")
+	fmt.Println("- Connect to headless server: dlv connect <addr>")
+}
+#+end_src
+
+*** Program with Debugging Hooks
+
+Let's create a sample program with instrumentation for advanced debugging:
+
+#+begin_src go :tangle debugging/debug_sample.go
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"runtime"
+	"runtime/pprof"
+	"sync"
+	"time"
+)
+
+// DebugInfo holds debugging context
+type DebugInfo struct {
+	StartTime time.Time
+	Traces    []string
+	mu        sync.Mutex
+}
+
+// Global debug info
+var debugInfo = &DebugInfo{
+	StartTime: time.Now(),
+	Traces:    make([]string, 0),
+}
+
+// Trace adds a trace message with timestamp
+func (d *DebugInfo) Trace(format string, args ...interface{}) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	
+	elapsed := time.Since(d.StartTime)
+	message := fmt.Sprintf(format, args...)
+	trace := fmt.Sprintf("[%.3fs] %s", elapsed.Seconds(), message)
+	
+	d.Traces = append(d.Traces, trace)
+	
+	// Only print in debug mode
+	if os.Getenv("DEBUG") == "1" {
+		fmt.Println(trace)
+	}
+}
+
+// DumpTraces writes all traces to stdout
+func (d *DebugInfo) DumpTraces() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	
+	fmt.Println("\n=== Debug Traces ===")
+	for _, trace := range d.Traces {
+		fmt.Println(trace)
+	}
+}
+
+// DumpStack captures and prints stack trace
+func DumpStack() {
+	buf := make([]byte, 4096)
+	n := runtime.Stack(buf, true)
+	fmt.Printf("\n=== Stack Trace ===\n%s\n", buf[:n])
+}
+
+// StartCPUProfile begins CPU profiling
+func StartCPUProfile(filename string) {
+	f, err := os.Create(filename)
+	if err != nil {
+		log.Fatalf("Could not create CPU profile: %v", err)
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		log.Fatalf("Could not start CPU profile: %v", err)
+	}
+}
+
+// StopCPUProfile stops CPU profiling
+func StopCPUProfile() {
+	pprof.StopCPUProfile()
+}
+
+// Sample function with a bug
+func buggyFunction(n int) int {
+	debugInfo.Trace("buggyFunction(%d) called", n)
+	
+	if n <= 0 {
+		debugInfo.Trace("buggyFunction: invalid input %d", n)
+		return 0
+	}
+	
+	// Bug: off-by-one error in loop bound
+	result := 0
+	for i := 0; i <= n; i++ {  // Should be i < n
+		result += i
+	}
+	
+	debugInfo.Trace("buggyFunction returning %d", result)
+	return result
+}
+
+// Function with data race
+func dataRaceFunction() {
+	debugInfo.Trace("dataRaceFunction called")
+	
+	// Shared counter without proper synchronization
+	counter := 0
+	var wg sync.WaitGroup
+	
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go func() {
+			// Race condition here
+			counter++
+			wg.Done()
+		}()
+	}
+	
+	wg.Wait()
+	debugInfo.Trace("dataRaceFunction counter: %d", counter)
+}
+
+// Main function
+func main() {
+	// Start CPU profiling if requested
+	if os.Getenv("PROFILE") == "1" {
+		StartCPUProfile("cpu.prof")
+		defer StopCPUProfile()
+	}
+	
+	// Register handler for SIGQUIT to dump stack trace
+	// This can be triggered with Ctrl+\ in Unix systems
+	
+	debugInfo.Trace("Program started")
+	
+	// Call functions with bugs for debugging demo
+	result := buggyFunction(5)
+	debugInfo.Trace("Main: buggyFunction result = %d", result)
+	
+	dataRaceFunction()
+	
+	// Force garbage collection for memory profiling demo
+	debugInfo.Trace("Forcing garbage collection")
+	runtime.GC()
+	
+	debugInfo.Trace("Program completed")
+	debugInfo.DumpTraces()
+}
+#+end_src
+
+*** Delve Debugging Script
+
+Here's a sample debugging session with Delve:
+
+#+begin_src bash :tangle debugging/debug_session.sh
+#!/bin/bash
+# Script demonstrating Delve debugging commands
+
+# Build the sample program with debug symbols
+go build -gcflags="all=-N -l" -o debug_app debug_sample.go
+
+echo "=== Delve Debugging Session ==="
+echo "Starting debugging session..."
+
+# Run these commands manually in the delve console:
+cat << 'EOF'
+# Start Delve with our app
+dlv exec ./debug_app
+
+# Set breakpoints
+break main.buggyFunction
+break main.dataRaceFunction
+
+# Start the program
+continue
+
+# Examine variables
+print n
+
+# Add a condition to a breakpoint
+condition 1 n == 5
+
+# Continue execution until next breakpoint
+continue
+
+# Step into a function
+step
+
+# Step over a line
+next
+
+# Check local variables
+locals
+
+# View goroutines
+goroutines
+
+# Switch to a specific goroutine
+goroutine 1
+
+# View stack trace
+stack
+
+# Create a watchpoint (watching a variable for changes)
+watch counter
+
+# Evaluate expressions
+print counter + 5
+
+# Check thread status
+threads
+
+# View deferred functions
+deferrers
+
+# Disassemble current function
+disassemble
+
+# Set a tracepoint (continue execution after hitting)
+trace main.dataRaceFunction
+
+# Exit debugger
+exit
+EOF
+
+echo
+echo "To run a full debugging session, execute:"
+echo "dlv exec ./debug_app"
+#+end_src
+
+*** Advanced Memory Debugging
+
+Memory debugging in Go requires special tools:
+
+#+begin_src go :tangle debugging/memory_debug.go
+package main
+
+import (
+	"fmt"
+	"net/http"
+	_ "net/http/pprof"  // Import for side-effects: registers pprof handlers
+	"os"
+	"runtime"
+	"runtime/debug"
+	"runtime/pprof"
+	"time"
+)
+
+// Memory leak simulation
+var leakySlice []string
+
+// Function with a memory leak
+func leakyFunction() {
+	fmt.Println("Running leaky function...")
+	
+	// This slice grows unbounded, causing a memory leak
+	for i := 0; i < 10000; i++ {
+		data := make([]byte, 1024*1024) // Allocate 1MB
+		s := fmt.Sprintf("Data block %d: %d bytes", i, len(data))
+		leakySlice = append(leakySlice, s)
+		
+		// Simulate processing
+		time.Sleep(1 * time.Millisecond)
+		
+		// Print memory stats every 1000 iterations
+		if i%1000 == 0 {
+			printMemStats()
+		}
+	}
+}
+
+// Print current memory statistics
+func printMemStats() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	
+	fmt.Printf("Alloc: %v MiB\n", m.Alloc / 1024 / 1024)
+	fmt.Printf("TotalAlloc: %v MiB\n", m.TotalAlloc / 1024 / 1024)
+	fmt.Printf("Sys: %v MiB\n", m.Sys / 1024 / 1024)
+	fmt.Printf("NumGC: %v\n", m.NumGC)
+	fmt.Printf("Goroutines: %d\n", runtime.NumGoroutine())
+	fmt.Println()
+}
+
+// Take a heap snapshot to a file
+func saveHeapProfile(filename string) {
+	f, err := os.Create(filename)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create heap profile: %v\n", err)
+		return
+	}
+	defer f.Close()
+	
+	fmt.Println("Writing heap profile to", filename)
+	
+	// Force garbage collection before profiling
+	runtime.GC()
+	
+	if err := pprof.WriteHeapProfile(f); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write heap profile: %v\n", err)
+	}
+}
+
+// Save memory profile at regular intervals
+func startProfiler() {
+	// Setup HTTP server for pprof
+	go func() {
+		fmt.Println("Starting pprof server on :6060")
+		fmt.Println("Access profiling data at http://localhost:6060/debug/pprof/")
+		http.ListenAndServe(":6060", nil)
+	}()
+	
+	// Take snapshots every 2 seconds
+	go func() {
+		for i := 1; ; i++ {
+			filename := fmt.Sprintf("heap_%d.prof", i)
+			saveHeapProfile(filename)
+			time.Sleep(2 * time.Second)
+		}
+	}()
+}
+
+func main() {
+	// Set garbage collection parameters for debugging
+	debug.SetGCPercent(100) // Default is 100
+	
+	// Start the profiler
+	startProfiler()
+	
+	// Run leaky function
+	leakyFunction()
+	
+	// Print final stats
+	fmt.Println("Final memory statistics:")
+	printMemStats()
+	
+	fmt.Println("Program completed. Check heap profiles for memory growth.")
+	fmt.Println("To analyze the profiles:")
+	fmt.Println("go tool pprof -http=:8080 heap_1.prof")
+	fmt.Println("go tool pprof -http=:8080 http://localhost:6060/debug/pprof/heap")
+}
+#+end_src
+
+*** Analyzing Heap Dumps
+
+Create a utility for analyzing heap dumps:
+
+#+begin_src go :tangle debugging/analyze_heap.go
+package main
+
+import (
+	"flag"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+func main() {
+	// Parse command line arguments
+	heapFile := flag.String("file", "", "Heap profile file to analyze")
+	diff := flag.String("diff", "", "Second heap profile for comparison")
+	server := flag.Bool("server", true, "Start a web server for interactive analysis")
+	port := flag.Int("port", 8080, "Port for web server")
+	flag.Parse()
+	
+	if *heapFile == "" {
+		fmt.Println("Please provide a heap profile file with -file")
+		flag.Usage()
+		os.Exit(1)
+	}
+	
+	// Verify file exists
+	if _, err := os.Stat(*heapFile); os.IsNotExist(err) {
+		log.Fatalf("Heap profile file not found: %s", *heapFile)
+	}
+	
+	// Get absolute path
+	absPath, err := filepath.Abs(*heapFile)
+	if err != nil {
+		log.Fatalf("Failed to get absolute path: %v", err)
+	}
+	
+	fmt.Printf("Analyzing heap profile: %s\n", absPath)
+	
+	// Text-based analysis first
+	fmt.Println("\n=== Top 10 memory allocations ===")
+	cmd := exec.Command("go", "tool", "pprof", "-top", "-lines", absPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		log.Fatalf("Failed to run pprof top command: %v", err)
+	}
+	
+	// Diff analysis if requested
+	if *diff != "" {
+		if _, err := os.Stat(*diff); os.IsNotExist(err) {
+			log.Fatalf("Second heap profile not found: %s", *diff)
+		}
+		
+		absDiffPath, err := filepath.Abs(*diff)
+		if err != nil {
+			log.Fatalf("Failed to get absolute path: %v", err)
+		}
+		
+		fmt.Printf("\n=== Comparing %s with %s ===\n", 
+			filepath.Base(absPath), 
+			filepath.Base(absDiffPath))
+		
+		cmd = exec.Command("go", "tool", "pprof", "-top", "-lines", 
+			"-base", absDiffPath, absPath)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			log.Fatalf("Failed to run pprof diff command: %v", err)
+		}
+	}
+	
+	// Start web server for interactive analysis if requested
+	if *server {
+		fmt.Printf("\n=== Starting pprof web server on port %d ===\n", *port)
+		fmt.Printf("Open your browser at: http://localhost:%d\n", *port)
+		fmt.Println("Press Ctrl+C to stop the server")
+		
+		cmd = exec.Command("go", "tool", "pprof", "-http", fmt.Sprintf(":%d", *port), absPath)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			// Don't fail on server exit
+			if !strings.Contains(err.Error(), "signal: interrupt") {
+				log.Fatalf("Failed to run pprof server: %v", err)
+			}
+		}
+	}
+}
+#+end_src
+
+** Abstract Syntax Tree Analysis and Manipulation
+
+Go's AST package provides powerful tools for analyzing and manipulating code.
+
+*** Parsing and Printing Go Code
+
+#+begin_src go :tangle ast/parse_print.go
+package main
+
+import (
+	"fmt"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
+	"os"
+	"strings"
+)
+
+const sampleCode = `
+package sample
+
+import (
+	"fmt"
+	"strings"
+)
+
+// SampleStruct demonstrates struct features
+type SampleStruct struct {
+	Name    string
+	Value   int
+	Enabled bool
+}
+
+// Process is a sample function
+func Process(input string, count int) (string, error) {
+	if count <= 0 {
+		return "", fmt.Errorf("invalid count: %d", count)
+	}
+	
+	result := strings.Repeat(input, count)
+	return result, nil
+}
+
+func main() {
+	s := SampleStruct{
+		Name:    "Example",
+		Value:   42,
+		Enabled: true,
+	}
+	
+	result, err := Process(s.Name, s.Value)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	
+	fmt.Println("Result:", result)
+}
+`
+
+func main() {
+	// Create a file set for position information
+	fset := token.NewFileSet()
+	
+	// Parse the sample code
+	file, err := parser.ParseFile(fset, "sample.go", sampleCode, parser.ParseComments)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse file: %v\n", err)
+		os.Exit(1)
+	}
+	
+	fmt.Println("=== Parsed Go File Structure ===")
+	fmt.Printf("Package: %s\n", file.Name)
+	
+	// Print imports
+	fmt.Println("\nImports:")
+	for _, imp := range file.Imports {
+		path := strings.Trim(imp.Path.Value, "\"")
+		if imp.Name != nil {
+			fmt.Printf("  %s %s\n", imp.Name, path)
+		} else {
+			fmt.Printf("  %s\n", path)
+		}
+	}
+	
+	// Print declarations
+	fmt.Println("\nDeclarations:")
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.GenDecl:
+			// Print types, vars, consts
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					fmt.Printf("  Type: %s\n", s.Name)
+				case *ast.ValueSpec:
+					for _, name := range s.Names {
+						fmt.Printf("  Value: %s\n", name)
+					}
+				}
+			}
+		case *ast.FuncDecl:
+			// Print function declarations
+			if d.Recv != nil {
+				// This is a method
+				fmt.Printf("  Method: %s\n", d.Name)
+			} else {
+				fmt.Printf("  Function: %s\n", d.Name)
+			}
+		}
+	}
+	
+	// Print the AST (abbreviated)
+	fmt.Println("\n=== AST Structure (Abbreviated) ===")
+	ast.Inspect(file, func(n ast.Node) bool {
+		if n == nil {
+			return false
+		}
+		
+		// Print node type and position
+		fmt.Printf("%T at %v\n", n, fset.Position(n.Pos()))
+		
+		// Special handling for some node types
+		switch x := n.(type) {
+		case *ast.Ident:
+			fmt.Printf("  Identifier: %s\n", x.Name)
+		case *ast.BasicLit:
+			fmt.Printf("  Literal: %s (%s)\n", x.Value, x.Kind)
+		case *ast.CallExpr:
+			fmt.Println("  Function Call")
+		}
+		
+		return true
+	})
+	
+	// Format and print the code
+	fmt.Println("\n=== Formatted Code ===")
+	err = format.Node(os.Stdout, fset, file)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to format file: %v\n", err)
+		os.Exit(1)
+	}
+}
+#+end_src
+
+*** Building a Custom Linter
+
+Create a simple but effective custom linter:
+
+#+begin_src go :tangle ast/custom_linter.go
+package main
+
+import (
+	"flag"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Issue represents a linting issue
+type Issue struct {
+	Pos      token.Position
+	Message  string
+	Severity string
+}
+
+// LintRule defines a rule for linting
+type LintRule interface {
+	Check(fset *token.FileSet, file *ast.File) []Issue
+	Name() string
+	Description() string
+}
+
+// UnusedImportRule checks for unused imports
+type UnusedImportRule struct{}
+
+func (r UnusedImportRule) Name() string {
+	return "unused-import"
+}
+
+func (r UnusedImportRule) Description() string {
+	return "Detects unused imports in the code"
+}
+
+func (r UnusedImportRule) Check(fset *token.FileSet, file *ast.File) []Issue {
+	var issues []Issue
+	
+	// Get all imports
+	imports := make(map[string]token.Position)
+	for _, imp := range file.Imports {
+		name := ""
+		if imp.Name != nil {
+			// Named import
+			name = imp.Name.Name
+			if name == "_" {
+				// Blank import is used for side effects
+				continue
+			}
+			if name == "." {
+				// Dot import is hard to track, skip for now
+				continue
+			}
+		} else {
+			// Regular import, extract the package name
+			path := strings.Trim(imp.Path.Value, "\"")
+			parts := strings.Split(path, "/")
+			name = parts[len(parts)-1]
+		}
+		imports[name] = fset.Position(imp.Pos())
+	}
+	
+	// Find all identifiers in the file
+	ast.Inspect(file, func(n ast.Node) bool {
+		if ident, ok := n.(*ast.Ident); ok {
+			// Skip checking package selectors (e.g., fmt.Printf)
+			if _, ok := imports[ident.Name]; ok {
+				// This identifier matches an import name, remove it from the map
+				delete(imports, ident.Name)
+			}
+		}
+		
+		// For SelectorExpr (e.g., fmt.Printf), check the package part
+		if sel, ok := n.(*ast.SelectorExpr); ok {
+			if x, ok := sel.X.(*ast.Ident); ok {
+				if _, ok := imports[x.Name]; ok {
+					// Used import, remove it from the map
+					delete(imports, x.Name)
+				}
+			}
+		}
+		
+		return true
+	})
+	
+	// Remaining imports in the map are unused
+	for name, pos := range imports {
+		issues = append(issues, Issue{
+			Pos:      pos,
+			Message:  fmt.Sprintf("Unused import: %s", name),
+			Severity: "warning",
+		})
+	}
+	
+	return issues
+}
+
+// ErrorReturnRule checks if errors are being checked
+type ErrorReturnRule struct{}
+
+func (r ErrorReturnRule) Name() string {
+	return "error-check"
+}
+
+func (r ErrorReturnRule) Description() string {
+	return "Ensures that errors returned from function calls are checked"
+}
+
+func (r ErrorReturnRule) Check(fset *token.FileSet, file *ast.File) []Issue {
+	var issues []Issue
+	
+	// Find all assignments
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch stmt := n.(type) {
+		case *ast.AssignStmt:
+			// Check if right side is a function call that might return an error
+			for _, rhs := range stmt.Rhs {
+				if call, ok := rhs.(*ast.CallExpr); ok {
+					// If the assignment has multiple left-hand values and more than one right-hand value,
+					// we need to check if the last one might be an error
+					if len(stmt.Lhs) > 1 && len(stmt.Rhs) == 1 {
+						// Check if the last left-hand value is being assigned to _
+						if len(stmt.Lhs) >= 2 {
+							lastLhs := stmt.Lhs[len(stmt.Lhs)-1]
+							if ident, ok := lastLhs.(*ast.Ident); ok && ident.Name == "_" {
+								// Error is being explicitly ignored
+								issues = append(issues, Issue{
+									Pos:      fset.Position(ident.Pos()),
+									Message:  "Error is explicitly ignored with _",
+									Severity: "warning",
+								})
+							}
+						}
+					}
+				}
+			}
+		case *ast.ExprStmt:
+			// Check for function calls whose return values are completely ignored
+			if call, ok := stmt.X.(*ast.CallExpr); ok {
+				// Try to determine if the function might return an error
+				// This is a simplistic approach - in a real linter, we would use type information
+				if funcName, ok := getFunctionName(call); ok {
+					if strings.HasPrefix(funcName, "Create") ||
+					   strings.HasPrefix(funcName, "New") ||
+					   strings.HasPrefix(funcName, "Open") ||
+					   strings.HasPrefix(funcName, "Read") ||
+					   strings.HasPrefix(funcName, "Write") {
+						issues = append(issues, Issue{
+							Pos:      fset.Position(call.Pos()),
+							Message:  fmt.Sprintf("Result of %s is ignored, but it might return an error", funcName),
+							Severity: "warning",
+						})
+					}
+				}
+			}
+		}
+		return true
+	})
+	
+	return issues
+}
+
+// Helper function to get the function name from a CallExpr
+func getFunctionName(call *ast.CallExpr) (string, bool) {
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		// Direct function call, e.g., doSomething()
+		return fun.Name, true
+	case *ast.SelectorExpr:
+		// Package or method call, e.g., pkg.Function() or obj.Method()
+		if ident, ok := fun.X.(*ast.Ident); ok {
+			return ident.Name + "." + fun.Sel.Name, true
+		}
+		return fun.Sel.Name, true
+	default:
+		return "", false
+	}
+}
+
+// Run the linter on a file
+func lintFile(filename string, rules []LintRule) ([]Issue, error) {
+	// Create file set for position information
+	fset := token.NewFileSet()
+	
+	// Parse the file
+	file, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse file: %v", err)
+	}
+	
+	// Apply all rules
+	var allIssues []Issue
+	for _, rule := range rules {
+		issues := rule.Check(fset, file)
+		allIssues = append(allIssues, issues...)
+	}
+	
+	return allIssues, nil
+}
+
+func main() {
+	// Parse command line flags
+	dir := flag.String("dir", ".", "Directory to lint")
+	recursive := flag.Bool("recursive", false, "Recursively lint subdirectories")
+	flag.Parse()
+	
+	// Create lint rules
+	rules := []LintRule{
+		UnusedImportRule{},
+		ErrorReturnRule{},
+	}
+	
+	// Process files
+	var filesToLint []string
+	
+	walkFn := func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if !*recursive && path != *dir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
+			filesToLint = append(filesToLint, path)
+		}
+		return nil
+	}
+	
+	if err := filepath.Walk(*dir, walkFn); err != nil {
+		fmt.Fprintf(os.Stderr, "Error walking directory: %v\n", err)
+		os.Exit(1)
+	}
+	
+	// Lint each file
+	issueCount := 0
+	for _, file := range filesToLint {
+		issues, err := lintFile(file, rules)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error linting %s: %v\n", file, err)
+			continue
+		}
+		
+		for _, issue := range issues {
+			fmt.Printf("%s:%d:%d: %s: %s\n",
+				issue.Pos.Filename,
+				issue.Pos.Line,
+				issue.Pos.Column,
+				issue.Severity,
+				issue.Message)
+			issueCount++
+		}
+	}
+	
+	// Print summary
+	fmt.Printf("\nLinted %d files, found %d issues\n", len(filesToLint), issueCount)
+	
+	// Return non-zero exit code if issues were found
+	if issueCount > 0 {
+		os.Exit(1)
+	}
+}
+#+end_src
+
+*** Code Generation with AST
+
+Creating a code generator using AST manipulation:
+
+#+begin_src go :tangle ast/code_generator.go
+package main
+
+import (
+	"bytes"
+	"flag"
+	"fmt"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
+	"os"
+	"strings"
+	"text/template"
+)
+
+// Command line flags
+var (
+	inputFile  = flag.String("input", "", "Input Go file containing struct definitions")
+	outputFile = flag.String("output", "", "Output file for generated code")
+	packageName = flag.String("package", "", "Package name for generated code (defaults to input package)")
+	genMethods = flag.Bool("methods", true, "Generate CRUD methods")
+	genJSON    = flag.Bool("json", true, "Generate JSON marshal/unmarshal methods")
+	genSQLite  = flag.Bool("sqlite", false, "Generate SQLite helpers")
+)
+
+// StructInfo holds information about a struct
+type StructInfo struct {
+	Name    string
+	Fields  []FieldInfo
+	Methods []MethodInfo
+	Comments []string
+}
+
+// FieldInfo holds information about a struct field
+type FieldInfo struct {
+	Name     string
+	Type     string
+	Tag      string
+	JSONName string
+	DBName   string
+	Comments []string
+}
+
+// MethodInfo holds information about a method
+type MethodInfo struct {
+	Name       string
+	Receiver   string
+	Params     []ParamInfo
+	Results    []ParamInfo
+	Comments   []string
+}
+
+// ParamInfo holds information about a parameter
+type ParamInfo struct {
+	Name string
+	Type string
+}
+
+// ExtractStructs extracts struct information from a Go file
+func ExtractStructs(filename string) ([]StructInfo, string, error) {
+	// Create a file set for position information
+	fset := token.NewFileSet()
+	
+	// Parse the Go file
+	file, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to parse file: %v", err)
+	}
+	
+	// Extract the package name
+	pkgName := file.Name.Name
+	
+	// Find all struct declarations
+	var structs []StructInfo
+	
+	for _, decl := range file.Decls {
+		// Check if it's a GenDecl (type, var, const, import)
+		if genDecl, ok := decl.(*ast.GenDecl); ok && genDecl.Tok == token.TYPE {
+			for _, spec := range genDecl.Specs {
+				if typeSpec, ok := spec.(*ast.TypeSpec); ok {
+					// Check if it's a struct
+					if structType, ok := typeSpec.Type.(*ast.StructType); ok {
+						// Create a new StructInfo
+						structInfo := StructInfo{
+							Name:   typeSpec.Name.Name,
+							Fields: make([]FieldInfo, 0),
+						}
+						
+						// Get comments for the struct
+						if genDecl.Doc != nil {
+							for _, comment := range genDecl.Doc.List {
+								structInfo.Comments = append(structInfo.Comments, comment.Text)
+							}
+						}
+						
+						// Process struct fields
+						for _, field := range structType.Fields.List {
+							// Skip fields without names (embedded types)
+							if len(field.Names) == 0 {
+								continue
+							}
+							
+							fieldName := field.Names[0].Name
+							fieldType := FormatNode(fset, field.Type)
+							
+							// Process field tags
+							var tag, jsonName, dbName string
+							if field.Tag != nil {
+								tag = field.Tag.Value
+								
+								// Extract JSON name
+								jsonName = extractTagValue(tag, "json")
+								if jsonName == "" {
+									jsonName = strings.ToLower(fieldName)
+								}
+								
+								// Extract DB name
+								dbName = extractTagValue(tag, "db")
+								if dbName == "" {
+									dbName = strings.ToLower(fieldName)
+								}
+							} else {
+								jsonName = strings.ToLower(fieldName)
+								dbName = strings.ToLower(fieldName)
+							}
+							
+							// Get comments for the field
+							var comments []string
+							if field.Doc != nil {
+								for _, comment := range field.Doc.List {
+									comments = append(comments, comment.Text)
+								}
+							}
+							if field.Comment != nil {
+								for _, comment := range field.Comment.List {
+									comments = append(comments, comment.Text)
+								}
+							}
+							
+							// Add field to struct
+							structInfo.Fields = append(structInfo.Fields, FieldInfo{
+								Name:     fieldName,
+								Type:     fieldType,
+								Tag:      tag,
+								JSONName: jsonName,
+								DBName:   dbName,
+								Comments: comments,
+							})
+						}
+						
+						// Add struct to the list
+						structs = append(structs, structInfo)
+					}
+				}
+			}
+		}
+		
+		// Check for methods associated with the structs
+		if funcDecl, ok := decl.(*ast.FuncDecl); ok && funcDecl.Recv != nil {
+			// This is a method, get the receiver type
+			recv := funcDecl.Recv.List[0]
+			var recvType string
+			
+			// Handle pointer and non-pointer receivers
+			switch t := recv.Type.(type) {
+			case *ast.StarExpr:
+				if ident, ok := t.X.(*ast.Ident); ok {
+					recvType = ident.Name
+				}
+			case *ast.Ident:
+				recvType = t.Name
+			}
+			
+			if recvType != "" {
+				// Find the struct this method belongs to
+				for i, s := range structs {
+					if s.Name == recvType {
+						// Process method parameters
+						var params []ParamInfo
+						if funcDecl.Type.Params != nil {
+							for _, param := range funcDecl.Type.Params.List {
+								paramType := FormatNode(fset, param.Type)
+								
+								// Handle multiple names for the same type
+								for _, name := range param.Names {
+									params = append(params, ParamInfo{
+										Name: name.Name,
+										Type: paramType,
+									})
+								}
+							}
+						}
+						
+						// Process method results
+						var results []ParamInfo
+						if funcDecl.Type.Results != nil {
+							for _, result := range funcDecl.Type.Results.List {
+								resultType := FormatNode(fset, result.Type)
+								
+								// Handle named and unnamed results
+								if len(result.Names) > 0 {
+									for _, name := range result.Names {
+										results = append(results, ParamInfo{
+											Name: name.Name,
+											Type: resultType,
+										})
+									}
+								} else {
+									results = append(results, ParamInfo{
+										Name: "",
+										Type: resultType,
+									})
+								}
+							}
+						}
+						
+						// Get comments for the method
+						var comments []string
+						if funcDecl.Doc != nil {
+							for _, comment := range funcDecl.Doc.List {
+								comments = append(comments, comment.Text)
+							}
+						}
+						
+						// Add method to the struct
+						structs[i].Methods = append(structs[i].Methods, MethodInfo{
+							Name:     funcDecl.Name.Name,
+							Receiver: FormatNode(fset, recv.Type),
+							Params:   params,
+							Results:  results,
+							Comments: comments,
+						})
+					}
+				}
+			}
+		}
+	}
+	
+	return structs, pkgName, nil
+}
+
+// FormatNode formats an AST node into a string
+func FormatNode(fset *token.FileSet, node ast.Node) string {
+	var buf bytes.Buffer
+	if err := format.Node(&buf, fset, node); err != nil {
+		return fmt.Sprintf("error formatting node: %v", err)
+	}
+	return buf.String()
+}
+
+// Extract a value from a struct tag
+func extractTagValue(tag, key string) string {
+	tag = strings.Trim(tag, "`")
+	
+	// Find the key in the tag
+	keyPrefix := key + ":"
+	for _, part := range strings.Split(tag, " ") {
+		if strings.HasPrefix(part, keyPrefix) {
+			value := part[len(keyPrefix):]
+			// Remove quotes
+			value = strings.Trim(value, "\"")
+			// Handle options like `json:"name,omitempty"`
+			parts := strings.Split(value, ",")
+			return parts[0]
+		}
+	}
+	
+	return ""
+}
+
+// Generate code for the structs
+func GenerateCode(structs []StructInfo, pkgName string) (string, error) {
+	// Use the package name from the flag if provided
+	if *packageName != "" {
+		pkgName = *packageName
+	}
+	
+	// Create a template for code generation
+	tmpl := template.New("code")
+	
+	// Helper functions for the template
+	tmpl = tmpl.Funcs(template.FuncMap{
+		"ToLower": strings.ToLower,
+		"Title":   strings.Title,
+		"Add":     func(a, b int) int { return a + b },
+	})
+	
+	// Define the template
+	tmplText := `// Code generated by code_generator.go; DO NOT EDIT.
+
+package {{ . }}
+
+{{range .}}
+{{range .}}
+{{if .Comments}}
+{{range .Comments}}{{.}}
+{{end}}
+{{end}}
+{{if and (eq $.GenJSON true) (ne .Name "") }}
+// Marshal{{.Name}} converts {{.Name}} to JSON
+func (s {{.Name}}) Marshal{{.Name}}() ([]byte, error) {
+	return json.Marshal(s)
+}
+
+// Unmarshal{{.Name}} parses JSON into {{.Name}}
+func Unmarshal{{.Name}}(data []byte) ({{.Name}}, error) {
+	var s {{.Name}}
+	err := json.Unmarshal(data, &s)
+	return s, err
+}
+{{end}}
+
+{{if and (eq $.GenMethods true) (ne .Name "") }}
+// New{{.Name}} creates a new instance of {{.Name}}
+func New{{.Name}}({{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.Name}} {{$f.Type}}{{end}}) *{{.Name}} {
+	return &{{.Name}}{
+		{{range .Fields}}{{.Name}}: {{.Name}},
+		{{end}}
+	}
+}
+
+// String returns a string representation of {{.Name}}
+func (s {{.Name}}) String() string {
+	return fmt.Sprintf("{{.Name}}{ {{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.Name}}: %v{{end}} }", {{range $i, $f := .Fields}}{{if $i}}, {{end}}s.{{$f.Name}}{{end}})
+}
+
+// Clone creates a deep copy of {{.Name}}
+func (s {{.Name}}) Clone() {{.Name}} {
+	return {{.Name}}{
+		{{range .Fields}}{{.Name}}: s.{{.Name}},
+		{{end}}
+	}
+}
+{{end}}
+
+{{if and (eq $.GenSQLite true) (ne .Name "") }}
+// Schema{{.Name}} returns the SQLite schema for {{.Name}}
+func Schema{{.Name}}() string {
+	return `CREATE TABLE IF NOT EXISTS {{ToLower .Name}} (
+		{{range $i, $f := .Fields}}{{if $i}},
+		{{end}}{{$f.DBName}} {{GetSQLType $f.Type}}{{end}}
+	);`
+}
+
+// Insert{{.Name}} inserts a {{.Name}} into the database
+func Insert{{.Name}}(db *sql.DB, s {{.Name}}) (int64, error) {
+	stmt, err := db.Prepare(`INSERT INTO {{ToLower .Name}} ({{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.DBName}}{{end}})
+		VALUES ({{range $i, $f := .Fields}}{{if $i}}, {{end}}?{{end}})`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+	
+	res, err := stmt.Exec({{range $i, $f := .Fields}}{{if $i}}, {{end}}s.{{$f.Name}}{{end}})
+	if err != nil {
+		return 0, err
+	}
+	
+	return res.LastInsertId()
+}
+
+// Get{{.Name}} retrieves a {{.Name}} by ID
+func Get{{.Name}}(db *sql.DB, id int64) ({{.Name}}, error) {
+	var s {{.Name}}
+	err := db.QueryRow(`SELECT {{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.DBName}}{{end}}
+		FROM {{ToLower .Name}} WHERE id = ?`, id).Scan({{range $i, $f := .Fields}}{{if $i}}, {{end}}&s.{{$f.Name}}{{end}})
+	return s, err
+}
+
+// Update{{.Name}} updates a {{.Name}} in the database
+func Update{{.Name}}(db *sql.DB, s {{.Name}}, id int64) error {
+	stmt, err := db.Prepare(`UPDATE {{ToLower .Name}} SET {{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.DBName}} = ?{{end}}
+		WHERE id = ?`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	
+	_, err = stmt.Exec({{range $i, $f := .Fields}}{{if $i}}, {{end}}s.{{$f.Name}}{{end}}, id)
+	return err
+}
+
+// Delete{{.Name}} deletes a {{.Name}} from the database
+func Delete{{.Name}}(db *sql.DB, id int64) error {
+	_, err := db.Exec(`DELETE FROM {{ToLower .Name}} WHERE id = ?`, id)
+	return err
+}
+{{end}}
+{{end}}
+{{end}}
+`
+
+	// Parse the template
+	tmpl, err := tmpl.Parse(tmplText)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %v", err)
+	}
+	
+	// Prepare template data
+	type TemplateData struct {
+		PackageName string
+		Structs     []StructInfo
+		GenMethods  bool
+		GenJSON     bool
+		GenSQLite   bool
+	}
+	
+	data := TemplateData{
+		PackageName: pkgName,
+		Structs:     structs,
+		GenMethods:  *genMethods,
+		GenJSON:     *genJSON,
+		GenSQLite:   *genSQLite,
+	}
+	
+	// Execute the template
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute template: %v", err)
+	}
+	
+	// Format the generated code
+	formattedCode, err := format.Source(buf.Bytes())
+	if err != nil {
+		// Return unformatted code if formatting fails
+		return buf.String(), fmt.Errorf("failed to format code: %v", err)
+	}
+	
+	return string(formattedCode), nil
+}
+
+func main() {
+	// Parse command line flags
+	flag.Parse()
+	
+	// Check required flags
+	if *inputFile == "" {
+		fmt.Println("Error: Input file is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+	
+	// Extract structs from the input file
+	structs, pkgName, err := ExtractStructs(*inputFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error extracting structs: %v\n", err)
+		os.Exit(1)
+	}
+	
+	// Generate code
+	code, err := GenerateCode(structs, pkgName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating code: %v\n", err)
+		os.Exit(1)
+	}
+	
+	// Write the generated code to the output file or stdout
+	if *outputFile != "" {
+		err = os.WriteFile(*outputFile, []byte(code), 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing output file: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Generated code written to %s\n", *outputFile)
+	} else {
+		fmt.Println(code)
+	}
+}
+#+end_src
+
+*** AST-Based Refactoring Tool
+
+Create a tool for automatic code refactoring:
+
+#+begin_src go :tangle ast/refactoring_tool.go
+package main
+
+import (
+	"bytes"
+	"flag"
+	"fmt"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Refactoring options
+var (
+	inputDir      = flag.String("dir", ".", "Directory to process")
+	recursive     = flag.Bool("recursive", false, "Process subdirectories recursively")
+	renameFn      = flag.String("rename-fn", "", "Rename function (old:new)")
+	renameType    = flag.String("rename-type", "", "Rename type (old:new)")
+	renameVar     = flag.String("rename-var", "", "Rename variable (old:new)")
+	extractMethod = flag.String("extract-method", "", "Extract method (file:line:name)")
+	addParam      = flag.String("add-param", "", "Add parameter (function:name:type)")
+	write         = flag.Bool("write", false, "Write changes to files")
+)
+
+// Refactoring interface
+type Refactoring interface {
+	Apply(fset *token.FileSet, file *ast.File) (bool, error)
+	Description() string
+}
+
+// RenameFunction refactoring
+type RenameFunction struct {
+	OldName string
+	NewName string
+}
+
+func (r RenameFunction) Description() string {
+	return fmt.Sprintf("Rename function from '%s' to '%s'", r.OldName, r.NewName)
+}
+
+func (r RenameFunction) Apply(fset *token.FileSet, file *ast.File) (bool, error) {
+	changed := false
+	
+	// Visit all identifiers
+	ast.Inspect(file, func(n ast.Node) bool {
+		if ident, ok := n.(*ast.Ident); ok && ident.Name == r.OldName {
+			// Check if this is a function declaration or a function call
+			if isFunctionIdent(ident) {
+				ident.Name = r.NewName
+				changed = true
+			}
+		}
+		return true
+	})
+	
+	return changed, nil
+}
+
+// RenameType refactoring
+type RenameType struct {
+	OldName string
+	NewName string
+}
+
+func (r RenameType) Description() string {
+	return fmt.Sprintf("Rename type from '%s' to '%s'", r.OldName, r.NewName)
+}
+
+func (r RenameType) Apply(fset *token.FileSet, file *ast.File) (bool, error) {
+	changed := false
+	
+	// Visit all identifiers
+	ast.Inspect(file, func(n ast.Node) bool {
+		if ident, ok := n.(*ast.Ident); ok && ident.Name == r.OldName {
+			// Check if this is a type identifier
+			if isTypeIdent(ident) {
+				ident.Name = r.NewName
+				changed = true
+			}
+		}
+		return true
+	})
+	
+	return changed, nil
+}
+
+// RenameVariable refactoring
+type RenameVariable struct {
+	OldName string
+	NewName string
+}
+
+func (r RenameVariable) Description() string {
+	return fmt.Sprintf("Rename variable from '%s' to '%s'", r.OldName, r.NewName)
+}
+
+func (r RenameVariable) Apply(fset *token.FileSet, file *ast.File) (bool, error) {
+	changed := false
+	
+	// Visit all identifiers
+	ast.Inspect(file, func(n ast.Node) bool {
+		if ident, ok := n.(*ast.Ident); ok && ident.Name == r.OldName {
+			// Check if this is a variable identifier
+			if isVarIdent(ident) {
+				ident.Name = r.NewName
+				changed = true
+			}
+		}
+		return true
+	})
+	
+	return changed, nil
+}
+
+// AddParameter refactoring
+type AddParameter struct {
+	FunctionName string
+	ParamName    string
+	ParamType    string
+}
+
+func (r AddParameter) Description() string {
+	return fmt.Sprintf("Add parameter '%s %s' to function '%s'", r.ParamName, r.ParamType, r.FunctionName)
+}
+
+func (r AddParameter) Apply(fset *token.FileSet, file *ast.File) (bool, error) {
+	changed := false
+	
+	// Visit all function declarations
+	ast.Inspect(file, func(n ast.Node) bool {
+		if funcDecl, ok := n.(*ast.FuncDecl); ok && funcDecl.Name.Name == r.FunctionName {
+			// Add parameter to the function declaration
+			newParam := &ast.Field{
+				Names: []*ast.Ident{ast.NewIdent(r.ParamName)},
+				Type:  ast.NewIdent(r.ParamType),
+			}
+			
+			if funcDecl.Type.Params == nil {
+				funcDecl.Type.Params = &ast.FieldList{}
+			}
+			
+			funcDecl.Type.Params.List = append(funcDecl.Type.Params.List, newParam)
+			changed = true
+			
+			// Now we should also update all calls to this function, but that's more complex
+			// and would require type checking to be done properly
+		}
+		return true
+	})
+	
+	return changed, nil
+}
+
+// Helper functions to check identifier types
+func isFunctionIdent(ident *ast.Ident) bool {
+	// Check if the identifier is a function name
+	if ident.Obj == nil {
+		return false
+	}
+	
+	switch ident.Obj.Kind {
+	case ast.Fun:
+		return true
+	default:
+		// Check parent node
+		switch parent := ident.Obj.Decl.(type) {
+		case *ast.FuncDecl:
+			return ident == parent.Name
+		case *ast.CallExpr:
+			switch fun := parent.Fun.(type) {
+			case *ast.Ident:
+				return ident == fun
+			case *ast.SelectorExpr:
+				return ident == fun.Sel
+			}
+		}
+	}
+	
+	return false
+}
+
+func isTypeIdent(ident *ast.Ident) bool {
+	// Check if the identifier is a type name
+	if ident.Obj == nil {
+		return false
+	}
+	
+	switch ident.Obj.Kind {
+	case ast.Typ:
+		return true
+	default:
+		// Check parent node
+		switch parent := ident.Obj.Decl.(type) {
+		case *ast.TypeSpec:
+			return ident == parent.Name
+		}
+	}
+	
+	return false
+}
+
+func isVarIdent(ident *ast.Ident) bool {
+	// Check if the identifier is a variable name
+	if ident.Obj == nil {
+		return false
+	}
+	
+	switch ident.Obj.Kind {
+	case ast.Var:
+		return true
+	default:
+		// Check parent node
+		switch ident.Obj.Decl.(type) {
+		case *ast.AssignStmt, *ast.ValueSpec, *ast.Field:
+			return true
+		}
+	}
+	
+	return false
+}
+
+// Apply refactorings to a file
+func applyRefactorings(filename string, refactorings []Refactoring) error {
+	// Create a file set for position information
+	fset := token.NewFileSet()
+	
+	// Parse the file
+	file, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
+	if err != nil {
+		return fmt.Errorf("failed to parse file: %v", err)
+	}
+	
+	// Apply each refactoring
+	changed := false
+	for _, r := range refactorings {
+		refChanged, err := r.Apply(fset, file)
+		if err != nil {
+			return fmt.Errorf("failed to apply refactoring: %v", err)
+		}
+		if refChanged {
+			changed = true
+			fmt.Printf("Applied '%s' to %s\n", r.Description(), filename)
+		}
+	}
+	
+	// If the file was changed and we should write the changes
+	if changed && *write {
+		// Format the file
+		var buf bytes.Buffer
+		if err := format.Node(&buf, fset, file); err != nil {
+			return fmt.Errorf("failed to format file: %v", err)
+		}
+		
+		// Write the changes back to the file
+		if err := os.WriteFile(filename, buf.Bytes(), 0644); err != nil {
+			return fmt.Errorf("failed to write file: %v", err)
+		}
+		
+		fmt.Printf("Wrote changes to %s\n", filename)
+	} else if changed {
+		fmt.Printf("Changes not written (use -write to save changes)\n")
+	} else {
+		fmt.Printf("No changes made to %s\n", filename)
+	}
+	
+	return nil
+}
+
+func main() {
+	// Parse command line flags
+	flag.Parse()
+	
+	// Create refactorings based on flags
+	var refactorings []Refactoring
+	
+	if *renameFn != "" {
+		parts := strings.Split(*renameFn, ":")
+		if len(parts) != 2 {
+			fmt.Fprintf(os.Stderr, "Invalid format for -rename-fn, expected 'old:new'\n")
+			os.Exit(1)
+		}
+		refactorings = append(refactorings, RenameFunction{
+			OldName: parts[0],
+			NewName: parts[1],
+		})
+	}
+	
+	if *renameType != "" {
+		parts := strings.Split(*renameType, ":")
+		if len(parts) != 2 {
+			fmt.Fprintf(os.Stderr, "Invalid format for -rename-type, expected 'old:new'\n")
+			os.Exit(1)
+		}
+		refactorings = append(refactorings, RenameType{
+			OldName: parts[0],
+			NewName: parts[1],
+		})
+	}
+	
+	if *renameVar != "" {
+		parts := strings.Split(*renameVar, ":")
+		if len(parts) != 2 {
+			fmt.Fprintf(os.Stderr, "Invalid format for -rename-var, expected 'old:new'\n")
+			os.Exit(1)
+		}
+		refactorings = append(refactorings, RenameVariable{
+			OldName: parts[0],
+			NewName: parts[1],
+		})
+	}
+	
+	if *addParam != "" {
+		parts := strings.Split(*addParam, ":")
+		if len(parts) != 3 {
+			fmt.Fprintf(os.Stderr, "Invalid format for -add-param, expected 'function:name:type'\n")
+			os.Exit(1)
+		}
+		refactorings = append(refactorings, AddParameter{
+			FunctionName: parts[0],
+			ParamName:    parts[1],
+			ParamType:    parts[2],
+		})
+	}
+	
+	// Check if we have any refactorings to apply
+	if len(refactorings) == 0 {
+		fmt.Println("No refactorings specified")
+		flag.Usage()
+		os.Exit(1)
+	}
+	
+	// Find Go files to process
+	var filesToProcess []string
+	
+	err := filepath.Walk(*inputDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		
+		// Skip directories unless recursive is enabled
+		if info.IsDir() && path != *inputDir && !*recursive {
+			return filepath.SkipDir
+		}
+		
+		// Process Go files
+		if !info.IsDir() && strings.HasSuffix(path, ".go") {
+			filesToProcess = append(filesToProcess, path)
+		}
+		
+		return nil
+	})
+	
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error walking directory: %v\n", err)
+		os.Exit(1)
+	}
+	
+	// Apply refactorings to each file
+	for _, filename := range filesToProcess {
+		if err := applyRefactorings(filename, refactorings); err != nil {
+			fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", filename, err)
+		}
+	}
+}
+#+end_src
+
+*** Integrating with go/analysis Framework
+
+Implement a tool using the go/analysis framework:
+
+#+begin_src go :tangle ast/analysis_tool.go
+package main
+
+import (
+	"flag"
+	"fmt"
+	"go/ast"
+	"go/token"
+	"go/types"
+	"os"
+	
+	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/analysis/passes/inspect"
+	"golang.org/x/tools/go/analysis/singlechecker"
+	"golang.org/x/tools/go/ast/inspector"
+)
+
+// Define a custom analysis pass
+var Analyzer = &analysis.Analyzer{
+	Name: "debugcheck",
+	Doc:  "checks for debugging-related issues in code",
+	Run:  run,
+	Requires: []*analysis.Analyzer{
+		inspect.Analyzer,
+	},
+}
+
+// Command line flags
+var (
+	checkDebugPrints = flag.Bool("debug-prints", true, "Check for debug print statements")
+	checkTodos       = flag.Bool("todos", true, "Check for TODO comments")
+	checkAsserts     = flag.Bool("asserts", true, "Check for assertions in production code")
+	verboseOutput    = flag.Bool("verbose", false, "Enable verbose output")
+)
+
+func run(pass *analysis.Pass) (interface{}, error) {
+	// Get the inspector from the pass
+	inspect := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
+	
+	// Node filter for the inspector
+	nodeFilter := []ast.Node{
+		(*ast.CallExpr)(nil),    // For debug prints and assertions
+		(*ast.Comment)(nil),     // For TODO comments
+		(*ast.CommentGroup)(nil), // For TODO comments
+	}
+	
+	// Visit the AST nodes
+	inspect.Preorder(nodeFilter, func(n ast.Node) {
+		switch node := n.(type) {
+		case *ast.CallExpr:
+			if *checkDebugPrints {
+				checkDebugPrint(pass, node)
+			}
+			if *checkAsserts {
+				checkAssertion(pass, node)
+			}
+		case *ast.Comment:
+			if *checkTodos {
+				checkTodoComment(pass, node)
+			}
+		}
+	})
+	
+	return nil, nil
+}
+
+// Check for debug print statements
+func checkDebugPrint(pass *analysis.Pass, call *ast.CallExpr) {
+	// Check if it's a function call
+	fun, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return
+	}
+	
+	// Get the package and function name
+	pkgIdent, ok := fun.X.(*ast.Ident)
+	if !ok {
+		return
+	}
+	
+	// Check for common debug print functions
+	pkgName := pkgIdent.Name
+	funcName := fun.Sel.Name
+	
+	debugFuncs := map[string]map[string]bool{
+		"fmt": {
+			"Print":   true,
+			"Printf":  true,
+			"Println": true,
+		},
+		"log": {
+			"Print":   true,
+			"Printf":  true,
+			"Println": true,
+		},
+	}
+	
+	if funcs, ok := debugFuncs[pkgName]; ok && funcs[funcName] {
+		// This is a potential debug print
+		// Check if it's in a function with "debug" in the name
+		inDebugFunc := false
+		
+		// Walk up the AST to find the enclosing function
+		path, _ := astPath(pass.Files, call)
+		for _, p := range path {
+			if fn, ok := p.(*ast.FuncDecl); ok {
+				if strings.Contains(strings.ToLower(fn.Name.Name), "debug") {
+					inDebugFunc = true
+					break
+				}
+			}
+		}
+		
+		// Report if it's not in a debug function
+		if !inDebugFunc {
+			pass.Reportf(call.Pos(), "potentially unused debug print statement: %s.%s", pkgName, funcName)
+		}
+	}
+}
+
+// Check for TODO comments
+func checkTodoComment(pass *analysis.Pass, comment *ast.Comment) {
+	text := comment.Text
+	
+	// Check for TODO/FIXME comments
+	if strings.Contains(strings.ToUpper(text), "TODO") || strings.Contains(strings.ToUpper(text), "FIXME") {
+		// Report all TODOs and FIXMEs
+		pass.Reportf(comment.Pos(), "found TODO/FIXME comment: %s", text)
+	}
+}
+
+// Check for assertions in production code
+func checkAssertion(pass *analysis.Pass, call *ast.CallExpr) {
+	// Check if it's a function call
+	fun, ok := call.Fun.(*ast.Ident)
+	if !ok {
+		return
+	}
+	
+	// Check for common assertion functions
+	assertFuncs := map[string]bool{
+		"assert":     true,
+		"assertThat": true,
+		"require":    true,
+		"check":      true,
+	}
+	
+	if assertFuncs[fun.Name] {
+		// This is a potential assertion
+		pass.Reportf(call.Pos(), "assertion found in production code: %s", fun.Name)
+	}
+}
+
+// Helper function to find the path to a node in the AST
+func astPath(files []*ast.File, target ast.Node) ([]ast.Node, bool) {
+	for _, f := range files {
+		path, found := findPath(f, target, nil)
+		if found {
+			return path, true
+		}
+	}
+	return nil, false
+}
+
+func findPath(root, target ast.Node, path []ast.Node) ([]ast.Node, bool) {
+	if root == target {
+		return append(path, root), true
+	}
+	
+	// Recursively search children
+	path = append(path, root)
+	
+	switch node := root.(type) {
+	case *ast.File:
+		for _, decl := range node.Decls {
+			if p, found := findPath(decl, target, path); found {
+				return p, true
+			}
+		}
+	case *ast.GenDecl:
+		for _, spec := range node.Specs {
+			if p, found := findPath(spec, target, path); found {
+				return p, true
+			}
+		}
+	case *ast.FuncDecl:
+		if node.Recv != nil {
+			if p, found := findPath(node.Recv, target, path); found {
+				return p, true
+			}
+		}
+		if node.Type != nil {
+			if p, found := findPath(node.Type, target, path); found {
+				return p, true
+			}
+		}
+		if node.Body != nil {
+			if p, found := findPath(node.Body, target, path); found {
+				return p, true
+			}
+		}
+	case *ast.BlockStmt:
+		for _, stmt := range node.List {
+			if p, found := findPath(stmt, target, path); found {
+				return p, true
+			}
+		}
+	case *ast.IfStmt:
+		if node.Init != nil {
+			if p, found := findPath(node.Init, target, path); found {
+				return p, true
+			}
+		}
+		if node.Cond != nil {
+			if p, found := findPath(node.Cond, target, path); found {
+				return p, true
+			}
+		}
+		if node.Body != nil {
+			if p, found := findPath(node.Body, target, path); found {
+				return p, true
+			}
+		}
+		if node.Else != nil {
+			if p, found := findPath(node.Else, target, path); found {
+				return p, true
+			}
+		}
+	case *ast.ForStmt:
+		if node.Init != nil {
+			if p, found := findPath(node.Init, target, path); found {
+				return p, true
+			}
+		}
+		if node.Cond != nil {
+			if p, found := findPath(node.Cond, target, path); found {
+				return p, true
+			}
+		}
+		if node.Post != nil {
+			if p, found := findPath(node.Post, target, path); found {
+				return p, true
+			}
+		}
+		if node.Body != nil {
+			if p, found := findPath(node.Body, target, path); found {
+				return p, true
+			}
+		}
+	case *ast.RangeStmt:
+		if node.Key != nil {
+			if p, found := findPath(node.Key, target, path); found {
+				return p, true
+			}
+		}
+		if node.Value != nil {
+			if p, found := findPath(node.Value, target, path); found {
+				return p, true
+			}
+		}
+		if node.X != nil {
+			if p, found := findPath(node.X, target, path); found {
+				return p, true
+			}
+		}
+		if node.Body != nil {
+			if p, found := findPath(node.Body, target, path); found {
+				return p, true
+			}
+		}
+	case *ast.ExprStmt:
+		if p, found := findPath(node.X, target, path); found {
+			return p, true
+		}
+	case *ast.CallExpr:
+		if p, found := findPath(node.Fun, target, path); found {
+			return p, true
+		}
+		for _, arg := range node.Args {
+			if p, found := findPath(arg, target, path); found {
+				return p, true
+			}
+		}
+	}
+	
+	return nil, false
+}
+
+func main() {
+	// Run the analyzer
+	singlechecker.Main(Analyzer)
+}
+#+end_src
+
+** Conclusion
+
+This tutorial has covered advanced Go debugging techniques and AST analysis for building developer tools. For staff+ engineers, understanding these concepts is critical for creating robust tooling, analyzing code at scale, and debugging complex systems.
+
+Key takeaways:
+
+1. Delve provides powerful debugging capabilities beyond standard debuggers
+2. Memory profiling is essential for detecting leaks and optimizing Go applications
+3. Go's AST package enables sophisticated code analysis and transformation
+4. The go/analysis framework simplifies building static analyzers and linters
+5. Code generation based on AST inspection enables powerful developer tooling
+
+These techniques form the foundation for building sophisticated developer tools and systems in Go.
